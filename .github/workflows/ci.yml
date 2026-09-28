@@ -57,11 +57,13 @@ jobs:
           echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
 
       - run: cargo fmt --all -- --check
-      - run: cargo clippy -p vexa-vault --all-targets -- -D warnings
       - name: Build (sBPF v3)
         run: cargo build-sbf --manifest-path programs/vault/Cargo.toml --arch v3 --sbf-out-dir target/deploy
       - name: Report program size
         run: ls -l target/deploy/vault.so
+      # After the build: the tests embed target/deploy/vault.so, and clippy
+      # compiles them.
+      - run: cargo clippy -p vexa-vault --all-targets -- -D warnings
       # LiteSVM tests against the freshly built binary, with the same runtime
       # and ZK SDK versions as mainnet.
       - run: cargo test -p vexa-vault
