@@ -17,10 +17,10 @@ updates:
     groups:
       npm-security:
         applies-to: security-updates
-        patterns: ["*"]
+        patterns: ['*']
 
   - package-ecosystem: cargo
-    directories: ["/programs/*", "/contracts/*"]
+    directories: ['/programs/*', '/contracts/*']
     schedule:
       interval: weekly
     open-pull-requests-limit: 0

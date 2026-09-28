@@ -29,7 +29,9 @@ describe('client-side key derivation', () => {
   it('signs with the derived Solana key', () => {
     const keys = deriveUserKeys(prf(4));
     const msg = new TextEncoder().encode('claim');
-    expect(verifySolanaSignature(msg, signWithSolanaSeed(keys.solanaSeed, msg), keys.solanaAddress)).toBe(true);
+    expect(
+      verifySolanaSignature(msg, signWithSolanaSeed(keys.solanaSeed, msg), keys.solanaAddress),
+    ).toBe(true);
   });
 
   it('builds a pubkey validity proof that verifies', () => {

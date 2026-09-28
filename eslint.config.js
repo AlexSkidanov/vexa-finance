@@ -20,7 +20,9 @@ export default tseslint.config(
     },
   },
   {
+    // Operational scripts print to the terminal and parse untyped JSON-RPC
+    // responses from Solana, NEAR and Supabase.
     files: ['scripts/**', 'programs/**/tests/**', 'programs/**/scripts/**'],
-    rules: { 'no-console': 'off' },
+    rules: { 'no-console': 'off', '@typescript-eslint/no-explicit-any': 'off' },
   },
 );

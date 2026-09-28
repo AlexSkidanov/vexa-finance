@@ -17,7 +17,9 @@
       "require": "./dist/crypto/index.cjs"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
@@ -32,7 +34,9 @@
     "@solana/zk-sdk": "^0.5.3"
   },
   "peerDependenciesMeta": {
-    "@solana/zk-sdk": { "optional": true }
+    "@solana/zk-sdk": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@solana/zk-sdk": "0.5.3"

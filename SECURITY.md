@@ -56,7 +56,7 @@ ships sooner.
 Some properties are by design, not bugs:
 
 - **Deposit and withdrawal amounts are public.** USDC entering or leaving the vault is
-  an ordinary SPL transfer. Confidentiality covers balances and transfers *inside*
+  an ordinary SPL transfer. Confidentiality covers balances and transfers _inside_
   cUSDC.
 - **The API never sees plaintext amounts or private keys.** Zero-knowledge proofs are
   generated in the SDK with the user's ElGamal key. If you find a code path where the

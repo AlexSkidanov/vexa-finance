@@ -1,6 +1,6 @@
 name: Bug report
 description: Something in the API, SDK or on-chain programs isn't working as expected.
-labels: ["bug"]
+labels: ['bug']
 body:
   - type: dropdown
     id: component

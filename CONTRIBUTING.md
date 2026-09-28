@@ -10,14 +10,14 @@ We keep an open and welcoming environment. Please review our
 
 ## Repository layout
 
-| Path                     | What lives there                                               |
-| ------------------------ | -------------------------------------------------------------- |
-| `apps/api`               | Hono REST API, webhooks and background workers                 |
-| `packages/core`          | Shared types, zod schemas and crypto helpers                   |
-| `packages/sdk`           | `@vexa/sdk`, the typed client                                  |
-| `programs/vault`         | Anchor program wrapping USDC into confidential cUSDC           |
-| `contracts/near-policy`  | NEAR contract enforcing agent spend policies                   |
-| `supabase/migrations`    | Postgres schema and row-level security policies                |
+| Path                    | What lives there                                     |
+| ----------------------- | ---------------------------------------------------- |
+| `apps/api`              | Hono REST API, webhooks and background workers       |
+| `packages/core`         | Shared types, zod schemas and crypto helpers         |
+| `packages/sdk`          | `@vexa/sdk`, the typed client                        |
+| `programs/vault`        | Anchor program wrapping USDC into confidential cUSDC |
+| `contracts/near-policy` | NEAR contract enforcing agent spend policies         |
+| `supabase/migrations`   | Postgres schema and row-level security policies      |
 
 ## Development
 

@@ -39,9 +39,9 @@ async function main() {
     )`;
 
   const applied = new Set(
-    (await sql<{ version: string }[]>`select version from supabase_migrations.schema_migrations`).map(
-      (r) => r.version,
-    ),
+    (
+      await sql<{ version: string }[]>`select version from supabase_migrations.schema_migrations`
+    ).map((r) => r.version),
   );
 
   const pending = readdirSync(MIGRATIONS_DIR)

@@ -14,12 +14,12 @@ On top of that:
 
 Under active development, built in the open. This repository is the backend: the API, the on-chain programs, the NEAR policy contract and the TypeScript SDK.
 
-| Phase | Scope | State |
-| --- | --- | --- |
-| 0 | Environment and secrets audit | Done |
-| 1 | Monorepo, API skeleton, Supabase schema, auth, handles, vault program | In progress |
-| 2 | Deposits, confidential transfers, withdrawals, fees, webhooks | Planned |
-| 3 | Agent accounts and policies, x402 payments, stealth mode, view keys, $VEXA | Planned |
+| Phase | Scope                                                                      | State       |
+| ----- | -------------------------------------------------------------------------- | ----------- |
+| 0     | Environment and secrets audit                                              | Done        |
+| 1     | Monorepo, API skeleton, Supabase schema, auth, handles, vault program      | In progress |
+| 2     | Deposits, confidential transfers, withdrawals, fees, webhooks              | Planned     |
+| 3     | Agent accounts and policies, x402 payments, stealth mode, view keys, $VEXA | Planned     |
 
 Everything targets Solana mainnet.
 
