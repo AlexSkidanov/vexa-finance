@@ -1,0 +1,12 @@
+node_modules/
+.env
+.env.*
+!.env.example
+dist/
+.turbo/
+target/
+.anchor/
+test-ledger/
+*.keypair.json
+.near-credentials/
+.DS_Store
