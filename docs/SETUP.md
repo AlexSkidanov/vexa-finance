@@ -132,7 +132,7 @@ Send real SOL from an exchange or your own wallet (Phantom, Solflare) to each pu
 
 `check-env` fails below these amounts. Override with `FEE_PAYER_MIN_SOL` / `ADMIN_MIN_SOL`. It also simulates a call to the ZK ElGamal proof program to confirm confidential transfers run on mainnet; that check needs the fee payer to hold some SOL.
 
-**Later, not now:** the Phase 1 program deploy is the one large cost. Solana charges rent for the program's bytecode: **~0.007 SOL per KB** of the compiled `vault.so` (a lean Anchor program is roughly 150–250 KB, so ~1–1.75 SOL). This is a refundable deposit, not a fee: `solana program close` returns it. We'll build with size optimizations, print the exact figure from `solana rent <bytes>` after the build, and you send only that to the admin key before deploying.
+**Later, not now:** the vault program deploy is the one large cost. Solana charges refundable rent for the program's bytecode, about 0.0051 SOL per KB on mainnet today. The current 277 KB build needs **1.408 SOL** of rent plus about 0.006 SOL of fees and account rent, **≈ 1.414 SOL** in total. `pnpm deploy:vault` prints the exact figure from live rent prices before anything is sent, and `solana program close` returns the rent if the program is ever retired.
 
 ### USDC
 
@@ -222,6 +222,22 @@ The code lives at **github.com/AlexSkidanov/vexa-finance**. Pushing from your ma
 
 ---
 
+## 11. Deploying the vault
+
+```bash
+anchor build          # produces target/deploy/vault.so and the IDL
+pnpm deploy:vault     # dry run: prints the plan and the exact SOL the admin needs
+pnpm deploy:vault --execute
+```
+
+The dry run reads rent prices from the cluster and compares them against the admin balance. Almost all of the cost is the program's rent deposit (about 0.0051 SOL per KB of `vault.so`), which is refunded if the program is ever closed with `solana program close`.
+
+`--execute` deploys with the admin key as upgrade authority, then creates the cUSDC mint and initializes the vault in one transaction, and writes `VAULT_PROGRAM_ID` and `CUSDC_MINT` into `.env`. It's safe to rerun: finished steps are skipped. Afterwards, `pnpm check-env` verifies the program and the mint on-chain.
+
+The program keypair lives at `target/deploy/vault-keypair.json` (gitignored). Keep a backup: losing it doesn't affect the deployed program, but it's needed to redeploy to the same address from scratch.
+
+---
+
 ## Checklist
 
 ```
@@ -234,4 +250,6 @@ The code lives at **github.com/AlexSkidanov/vexa-finance**. Pushing from your ma
 [ ] GitHub: AlexSkidanov/vexa-finance exists
 [ ] Railway: project + token
 [ ] pnpm check-env -> Result: PASS
+[ ] pnpm db:migrate
+[ ] anchor build && pnpm deploy:vault --execute
 ```

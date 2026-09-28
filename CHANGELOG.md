@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Vault program** (`programs/vault`): wraps USDC 1:1 into cUSDC, a Token-2022 mint with
+  confidential transfers. Deposits land directly in the owner's pending confidential balance;
+  withdrawals burn cUSDC and release USDC to any account. Initialization is restricted to the
+  upgrade authority and rejects any mint that could be frozen, seized or inflated.
+- **API** (`apps/api`): email OTP and passkey sign-in, handle claims bound to the user's Solana
+  key by signature, public handle resolution, API keys, request ids, structured logging with
+  amount and secret redaction, per-IP rate limits and idempotency on every create endpoint.
+- **Database**: initial Supabase schema with row-level security on every table and no plaintext
+  amount columns; `pnpm db:migrate` with invariant checks and a `--dry-run` mode.
+- **`@vexa/sdk`**: typed client with environment inference from the key prefix, idempotent
+  retries and browser passkey helpers.
+- **`@vexa/core`**: shared schemas, handle rules, key validation, and client-side key derivation
+  from a passkey's PRF output.
+- `pnpm deploy:vault`: prints the exact SOL required, then deploys and initializes the vault.
+- CI: lint, typecheck, tests, vault build and tests, and a secret scan on every pull request.
+
 - `pnpm check-env`: validates every setting in `.env` and probes Supabase, Solana RPC,
   NEAR RPC and the NEAR Intents 1Click API, including whether the ZK ElGamal proof
   program is live on the target cluster.
