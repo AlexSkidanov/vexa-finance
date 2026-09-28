@@ -1,0 +1,47 @@
+[package]
+name = "vexa-vault"
+version = "0.1.0"
+description = "Wraps USDC 1:1 into cUSDC, a Token-2022 mint with confidential transfers"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "vault"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+anchor-lang = { version = "1.2.0", features = ["init-if-needed"] }
+anchor-spl = { version = "1.2.0", default-features = false, features = ["token", "token_2022", "associated_token"] }
+spl-token-2022-interface = "2.1.0"
+spl-token-confidential-transfer-proof-extraction = "0.5.1"
+solana-instructions-sysvar = "3.0.1"
+bytemuck = "1"
+
+[dev-dependencies]
+litesvm = "0.17.0"
+solana-message = "4.2.4"
+solana-transaction = "4.1.5"
+solana-signer = "3.0.1"
+solana-keypair = "3.1.2"
+# Proofs must be generated with the same zk-sdk the cluster verifies with.
+# Mainnet runs Agave 4.3, whose ZK ElGamal proof program uses solana-zk-sdk 7.
+zk-sdk = { package = "solana-zk-sdk", version = "7.0.1" }
+zk-proof-interface = { package = "solana-zk-elgamal-proof-interface", version = "0.1.2" }
+proof-generation = { package = "spl-token-confidential-transfer-proof-generation", version = "0.6.1" }
+spl-token-interface = "2.0.0"
+spl-associated-token-account-interface = "2.0.0"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }
