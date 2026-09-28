@@ -111,22 +111,37 @@ These land in upcoming releases; see [Status](#status). The designs are summariz
 
 ## Status
 
-| Phase | Scope                                                                                    | State        |
-| ----- | ---------------------------------------------------------------------------------------- | ------------ |
-| 0     | Environment and secrets audit                                                            | ✅ Done      |
-| 1     | Monorepo, API, Supabase schema and RLS, email + passkey auth, handles, vault program, CI | 🚧 In review |
-| 2     | Deposits, confidential transfers, withdrawals, fees, webhooks                            | Planned      |
-| 3     | Agent accounts and policies, x402 payments, stealth mode, view keys, $VEXA               | Planned      |
+| Phase | Scope                                                                                    | State                               |
+| ----- | ---------------------------------------------------------------------------------------- | ----------------------------------- |
+| 0     | Environment and secrets audit                                                            | ✅ Done                             |
+| 1     | Monorepo, API, Supabase schema and RLS, email + passkey auth, handles, vault program, CI | ✅ Vault live on mainnet, in review |
+| 2     | Deposits, confidential transfers, withdrawals, fees, webhooks                            | Planned                             |
+| 3     | Agent accounts and policies, x402 payments, stealth mode, view keys, $VEXA               | Planned                             |
 
 Card issuing and KYC ship as interfaces with mock implementations first.
 
 ## Deployments
 
-| Network        | Component     | Address                                                                                                                            |
-| -------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| Solana mainnet | Vault program | [`3g2JPX4roASUJVacf68sBSpARk5m9B3hu9xeaE6mTjPR`](https://explorer.solana.com/address/3g2JPX4roASUJVacf68sBSpARk5m9B3hu9xeaE6mTjPR) |
-| Solana mainnet | cUSDC mint    | _set at deployment_                                                                                                                |
-| NEAR mainnet   | MPC signer    | [`v1.signer`](https://nearblocks.io/address/v1.signer)                                                                             |
+### ⛓️ Solana mainnet
+
+| Component                                       | Address                                                                                                                            |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Vault program                                   | [`3g2JPX4roASUJVacf68sBSpARk5m9B3hu9xeaE6mTjPR`](https://explorer.solana.com/address/3g2JPX4roASUJVacf68sBSpARk5m9B3hu9xeaE6mTjPR) |
+| cUSDC mint (Token-2022, confidential transfers) | [`4STXpFN2mQSt12XG4os7ftLXHbBq5PVWYCAahToRt6QQ`](https://explorer.solana.com/address/4STXpFN2mQSt12XG4os7ftLXHbBq5PVWYCAahToRt6QQ) |
+| Vault config (mint authority, reserve owner)    | [`7Q3LNA4P3J7H4zNdHJEephe2XEvBPKPUJsqGifexRopw`](https://explorer.solana.com/address/7Q3LNA4P3J7H4zNdHJEephe2XEvBPKPUJsqGifexRopw) |
+| USDC reserve                                    | [`8eeishQYvtHwwM8QRN9629zzU9hBn18dGFW5T75ytqz6`](https://explorer.solana.com/address/8eeishQYvtHwwM8QRN9629zzU9hBn18dGFW5T75ytqz6) |
+| USDC mint (Circle)                              | [`EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`](https://explorer.solana.com/address/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v) |
+
+The deployed bytecode is the `target/deploy/vault.so` built from this repository at the Phase 1 tag with `pnpm build:vault` (SHA-256 `f8d284af753f129c1799b8d1aea990026284cbe5ccf14ed3a5ac289dc3db8e46`). Compare it against `solana program dump 3g2JPX4roASUJVacf68sBSpARk5m9B3hu9xeaE6mTjPR vault.so -um`.
+
+The reserve always holds at least as much USDC as the cUSDC supply; both are public and can be checked at any time.
+
+### 🔗 NEAR mainnet
+
+| Component                     | Address                                                |
+| ----------------------------- | ------------------------------------------------------ |
+| MPC signer (chain signatures) | [`v1.signer`](https://nearblocks.io/address/v1.signer) |
+| Policy contract               | _Phase 3_                                              |
 
 ## Pre-requisites
 

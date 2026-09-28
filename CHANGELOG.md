@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Deployed
+
+- Vault program on Solana mainnet at `3g2JPX4roASUJVacf68sBSpARk5m9B3hu9xeaE6mTjPR`, with the cUSDC
+  mint at `4STXpFN2mQSt12XG4os7ftLXHbBq5PVWYCAahToRt6QQ`. The upgrade authority was moved to a
+  dedicated key right after initialization.
+
 ### Added
 
 - **Vault program** (`programs/vault`): wraps USDC 1:1 into cUSDC, a Token-2022 mint with

@@ -233,6 +233,17 @@ The dry run reads rent prices from the cluster and compares them against the adm
 
 `--execute` deploys with the admin key as upgrade authority, then creates the cUSDC mint and initializes the vault in one transaction, and writes `VAULT_PROGRAM_ID` and `CUSDC_MINT` into `.env`. It's safe to rerun: finished steps are skipped. Afterwards, `pnpm check-env` verifies the program and the mint on-chain.
 
+After deploying, move the program's upgrade authority to a dedicated key that never touches a server or a chat:
+
+```bash
+solana-keygen new -o ~/.config/vexa/upgrade-authority.json
+solana program set-upgrade-authority <VAULT_PROGRAM_ID> \
+  --upgrade-authority ~/.config/vexa/admin.json \
+  --new-upgrade-authority ~/.config/vexa/upgrade-authority.json -um
+```
+
+The upgrade authority can replace the program's code, so it's the most sensitive key in the system. Keep it offline; the admin key only needs to pause the vault and manage the mint's confidential-transfer settings.
+
 The program keypair lives at `target/deploy/vault-keypair.json` (gitignored). Keep a backup: losing it doesn't affect the deployed program, but it's needed to redeploy to the same address from scratch.
 
 ---
