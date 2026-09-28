@@ -15,7 +15,9 @@
     "dev": "turbo run dev --filter=@vexa/api",
     "check-env": "tsx scripts/check-env.ts",
     "db:migrate": "tsx scripts/migrate.ts",
-    "deploy:vault": "tsx scripts/deploy-vault.ts"
+    "deploy:vault": "tsx scripts/deploy-vault.ts",
+    "build:vault": "cargo build-sbf --manifest-path programs/vault/Cargo.toml --arch v3 --sbf-out-dir target/deploy",
+    "test:vault": "pnpm build:vault && cargo test -p vexa-vault"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
