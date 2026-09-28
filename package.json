@@ -13,7 +13,8 @@
     "format": "prettier --write .",
     "test": "turbo run test",
     "dev": "turbo run dev --filter=@vexa/api",
-    "check-env": "tsx scripts/check-env.ts"
+    "check-env": "tsx scripts/check-env.ts",
+    "db:migrate": "tsx scripts/migrate.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
