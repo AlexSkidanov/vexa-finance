@@ -16,15 +16,14 @@ Secrets never leave `.env` except into Railway and GitHub Actions secrets. `.env
 
 ## 0. Local toolchain
 
-| Tool             | Install                                                                                                       | Needed for                   |
-| ---------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------------- |
-| Node 20+         | `brew install node`                                                                                           | everything                   |
-| pnpm 9           | `corepack enable`                                                                                             | everything                   |
-| Solana CLI       | `sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"`                                               | keypairs, airdrops, deploys  |
-| Rust             | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh`                                             | vault program, NEAR contract |
-| Anchor (via avm) | `cargo install --git https://github.com/coral-xyz/anchor avm --force && avm install latest && avm use latest` | Phase 1                      |
-| near-cli-rs      | `npm i -g near-cli-rs`                                                                                        | NEAR account below           |
-| cargo-near       | `cargo install --locked cargo-near`                                                                           | Phase 3                      |
+| Tool        | Install                                                           | Needed for                   |
+| ----------- | ----------------------------------------------------------------- | ---------------------------- |
+| Node 20+    | `brew install node`                                               | everything                   |
+| pnpm 9      | `corepack enable`                                                 | everything                   |
+| Solana CLI  | `sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"`   | keypairs, airdrops, deploys  |
+| Rust        | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` | vault program, NEAR contract |
+| near-cli-rs | `npm i -g near-cli-rs`                                            | NEAR account below           |
+| cargo-near  | `cargo install --locked cargo-near`                               | Phase 3                      |
 
 ---
 
@@ -132,7 +131,7 @@ Send real SOL from an exchange or your own wallet (Phantom, Solflare) to each pu
 
 `check-env` fails below these amounts. Override with `FEE_PAYER_MIN_SOL` / `ADMIN_MIN_SOL`. It also simulates a call to the ZK ElGamal proof program to confirm confidential transfers run on mainnet; that check needs the fee payer to hold some SOL.
 
-**Later, not now:** the vault program deploy is the one large cost. Solana charges refundable rent for the program's bytecode, about 0.0051 SOL per KB on mainnet today. The current 277 KB build needs **1.408 SOL** of rent plus about 0.006 SOL of fees and account rent, **≈ 1.414 SOL** in total. `pnpm deploy:vault` prints the exact figure from live rent prices before anything is sent, and `solana program close` returns the rent if the program is ever retired.
+**Later, not now:** the vault program deploy is the one large cost. Solana charges refundable rent for the program's bytecode, about 0.0051 SOL per KB on mainnet today. The current 36 KB build needs **0.183 SOL** of rent plus about 0.005 SOL of fees and account rent, **≈ 0.188 SOL** in total. `pnpm deploy:vault` prints the exact figure from live rent prices before anything is sent, and `solana program close` returns the rent if the program is ever retired.
 
 ### USDC
 
@@ -143,7 +142,7 @@ Send real SOL from an exchange or your own wallet (Phantom, Solflare) to each pu
 
 | Variable                | Produced by                     |
 | ----------------------- | ------------------------------- |
-| `VAULT_PROGRAM_ID`      | `anchor deploy` in Phase 1      |
+| `VAULT_PROGRAM_ID`      | `pnpm deploy:vault` in Phase 1  |
 | `CUSDC_MINT`            | vault init script in Phase 1    |
 | `TREASURY_OWNER_PUBKEY` | Phase 2 (fee treasury)          |
 | `VEXA_TOKEN_MINT`       | Phase 3 (~0.0015 SOL mint rent) |
@@ -225,7 +224,7 @@ The code lives at **github.com/AlexSkidanov/vexa-finance**. Pushing from your ma
 ## 11. Deploying the vault
 
 ```bash
-anchor build          # produces target/deploy/vault.so and the IDL
+pnpm build:vault      # cargo build-sbf → target/deploy/vault.so
 pnpm deploy:vault     # dry run: prints the plan and the exact SOL the admin needs
 pnpm deploy:vault --execute
 ```
@@ -251,5 +250,5 @@ The program keypair lives at `target/deploy/vault-keypair.json` (gitignored). Ke
 [ ] Railway: project + token
 [ ] pnpm check-env -> Result: PASS
 [ ] pnpm db:migrate
-[ ] anchor build && pnpm deploy:vault --execute
+[ ] pnpm build:vault && pnpm deploy:vault --execute
 ```

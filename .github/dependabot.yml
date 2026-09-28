@@ -4,7 +4,7 @@
 # `open-pull-requests-limit: 0`; security updates are driven by published
 # advisories and are not affected by that limit.
 #
-# Crypto and on-chain dependencies (@solana/*, anchor-*, spl-*, near-*) are
+# Crypto and on-chain dependencies (@solana/*, pinocchio*, spl-*, near-*) are
 # upgraded by hand, because a silent minor bump in proof generation or account
 # layouts can break confidential transfers in ways unit tests won't catch.
 version: 2

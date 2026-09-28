@@ -10,14 +10,14 @@ We keep an open and welcoming environment. Please review our
 
 ## Repository layout
 
-| Path                    | What lives there                                     |
-| ----------------------- | ---------------------------------------------------- |
-| `apps/api`              | Hono REST API, webhooks and background workers       |
-| `packages/core`         | Shared types, zod schemas and crypto helpers         |
-| `packages/sdk`          | `@vexa/sdk`, the typed client                        |
-| `programs/vault`        | Anchor program wrapping USDC into confidential cUSDC |
-| `contracts/near-policy` | NEAR contract enforcing agent spend policies         |
-| `supabase/migrations`   | Postgres schema and row-level security policies      |
+| Path                    | What lives there                                        |
+| ----------------------- | ------------------------------------------------------- |
+| `apps/api`              | Hono REST API, webhooks and background workers          |
+| `packages/core`         | Shared types, zod schemas and crypto helpers            |
+| `packages/sdk`          | `@vexa/sdk`, the typed client                           |
+| `programs/vault`        | Pinocchio program wrapping USDC into confidential cUSDC |
+| `contracts/near-policy` | NEAR contract enforcing agent spend policies            |
+| `supabase/migrations`   | Postgres schema and row-level security policies         |
 
 ## Development
 
@@ -30,8 +30,8 @@ cp .env.example .env   # see docs/SETUP.md
 pnpm check-env
 ```
 
-On-chain work also needs Rust, the Solana CLI and Anchor. Exact versions are pinned
-in `rust-toolchain.toml` and `Anchor.toml`.
+On-chain work also needs Rust and the Solana CLI (`cargo build-sbf`). The Rust
+version is pinned in `rust-toolchain.toml`; the Solana CLI version in CI.
 
 ### Commits
 
@@ -50,7 +50,7 @@ PRs are squash-merged, so the PR title becomes the commit on `main`.
 ### Before opening a PR
 
 - `pnpm lint`, `pnpm typecheck` and `pnpm test` pass.
-- On-chain changes: `cargo fmt`, `cargo clippy` and `anchor test` pass.
+- On-chain changes: `cargo fmt`, `cargo clippy` and `pnpm test:vault` pass.
 - New endpoints are documented in `docs/API.md` and covered by tests.
 - New create endpoints require an idempotency key.
 - **No plaintext amounts server-side.** Nothing under `apps/api` may log, store or

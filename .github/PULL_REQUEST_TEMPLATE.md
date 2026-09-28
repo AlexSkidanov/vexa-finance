@@ -13,7 +13,7 @@
 ## Checklist
 
 - [ ] `pnpm lint`, `pnpm typecheck` and `pnpm test` pass
-- [ ] On-chain changes: `anchor test` / `cargo test` pass
+- [ ] On-chain changes: `pnpm test:vault` passes
 - [ ] No plaintext amounts or secrets are logged, stored or returned by the API
 - [ ] New create endpoints require an idempotency key
 - [ ] Docs updated (`docs/API.md`, `docs/ARCHITECTURE.md`, `CHANGELOG.md`)

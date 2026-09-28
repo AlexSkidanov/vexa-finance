@@ -13,7 +13,7 @@
     <a href="https://github.com/AlexSkidanov/vexa-finance/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/AlexSkidanov/vexa-finance/ci.yml?branch=main&style=flat-square&label=CI" alt="CI" /></a>
     <a href="#license"><img src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue?style=flat-square" alt="License" /></a>
     <a href="https://solana.com"><img src="https://img.shields.io/badge/solana-mainnet-9945FF?style=flat-square" alt="Solana mainnet" /></a>
-    <a href="https://www.anchor-lang.com"><img src="https://img.shields.io/badge/anchor-1.2-lightgray?style=flat-square" alt="Anchor 1.2" /></a>
+    <a href="https://github.com/anza-xyz/pinocchio"><img src="https://img.shields.io/badge/pinocchio-0.11-lightgray?style=flat-square" alt="Pinocchio 0.11" /></a>
     <a href="https://docs.near.org/chain-abstraction/chain-signatures"><img src="https://img.shields.io/badge/NEAR-chain%20signatures-00EC97?style=flat-square" alt="NEAR chain signatures" /></a>
     <a href="https://vexa.finance"><img src="https://img.shields.io/badge/web-vexa.finance-black?style=flat-square" alt="vexa.finance" /></a>
   </p>
@@ -92,7 +92,7 @@ These land in upcoming releases; see [Status](#status). The designs are summariz
 
 | Name        | Description                                                              | Path                                |
 | ----------- | ------------------------------------------------------------------------ | ----------------------------------- |
-| vault       | Anchor program wrapping USDC 1:1 into confidential cUSDC                 | [`programs/vault`](programs/vault)  |
+| vault       | Pinocchio program wrapping USDC 1:1 into confidential cUSDC              | [`programs/vault`](programs/vault)  |
 | near-policy | NEAR contract enforcing agent spend policies and gating chain signatures | `contracts/near-policy` _(planned)_ |
 
 ### 🧩 Packages
@@ -131,7 +131,7 @@ Card issuing and KYC ship as interfaces with mock implementations first.
 ## Pre-requisites
 
 - [Node.js](https://nodejs.org) 22 (20+ works) and [pnpm](https://pnpm.io) 9 via `corepack enable`
-- For the programs: [Rust](https://rustup.rs), the [Solana CLI](https://docs.anza.xyz/cli/install) and [Anchor](https://www.anchor-lang.com/docs/installation) 1.2
+- For the vault program: [Rust](https://rustup.rs) and the [Solana CLI](https://docs.anza.xyz/cli/install) (for `cargo build-sbf`)
 
 ## Quickstart
 
@@ -183,11 +183,11 @@ pnpm dev                 # API on http://localhost:8787
 ### Building and testing the vault
 
 ```bash
-anchor build
-anchor test --skip-deploy --skip-local-validator
+pnpm build:vault   # cargo build-sbf, sBPF v3
+cargo test -p vexa-vault
 ```
 
-The tests run on [LiteSVM](https://github.com/LiteSVM/litesvm) with the same Agave runtime and ZK SDK versions as mainnet, including real equality and range proofs.
+The program is written with [Pinocchio](https://github.com/anza-xyz/pinocchio), with no framework and no allocator, to keep its on-chain rent low: 36 KB, about 0.18 SOL. The tests run on [LiteSVM](https://github.com/LiteSVM/litesvm) with the same Agave runtime and ZK SDK versions as mainnet, including real equality and range proofs.
 
 ## Security
 

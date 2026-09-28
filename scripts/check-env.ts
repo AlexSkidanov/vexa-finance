@@ -329,7 +329,7 @@ const SPECS: Spec[] = [
     key: 'VAULT_PROGRAM_ID',
     level: 'later',
     schema: pubkey,
-    note: 'Phase 1 (anchor deploy)',
+    note: 'Phase 1 (pnpm deploy:vault)',
   },
   {
     group: 'Solana',

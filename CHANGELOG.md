@@ -12,7 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Vault program** (`programs/vault`): wraps USDC 1:1 into cUSDC, a Token-2022 mint with
   confidential transfers. Deposits land directly in the owner's pending confidential balance;
   withdrawals burn cUSDC and release USDC to any account. Initialization is restricted to the
-  upgrade authority and rejects any mint that could be frozen, seized or inflated.
+  upgrade authority and rejects any mint that could be frozen, seized or inflated. Written with
+  Pinocchio: 36 KB on-chain, about 0.18 SOL of rent.
 - **API** (`apps/api`): email OTP and passkey sign-in, handle claims bound to the user's Solana
   key by signature, public handle resolution, API keys, request ids, structured logging with
   amount and secret redaction, per-IP rate limits and idempotency on every create endpoint.
