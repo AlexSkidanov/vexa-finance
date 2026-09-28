@@ -14,7 +14,6 @@
  * Safe to rerun: finished steps are detected and skipped.
  */
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -59,7 +58,6 @@ const ENV_PATH =
     : join(ROOT, '.env');
 const SO_PATH = join(ROOT, 'target/deploy/vault.so');
 const PROGRAM_KEYPAIR = join(ROOT, 'target/deploy/vault-keypair.json');
-const IDL_PATH = join(ROOT, 'target/idl/vault.json');
 const execute = process.argv.includes('--execute');
 
 const TOKEN_PROGRAM = address('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
@@ -110,7 +108,7 @@ async function main() {
 
   // ---- Plan and cost -------------------------------------------------------
   if (!existsSync(SO_PATH))
-    throw new Error('target/deploy/vault.so not found. Run `anchor build` first.');
+    throw new Error('target/deploy/vault.so not found. Run `pnpm build:vault` first.');
   const soLen = statSync(SO_PATH).size;
   const mintSize = getMintSize([
     {
@@ -205,6 +203,15 @@ async function main() {
     if (!(await isDeployed(rpc, programId)))
       throw new Error('deploy finished but the program is not executable');
     console.log(`Deployed ${programId}`);
+    // A freshly deployed program isn't visible to every bank at once, and
+    // transaction pre-flight simulation may run against the finalized one.
+    // Wait until the deployment is finalized before calling initialize.
+    process.stdout.write('Waiting for the deployment to finalize');
+    while (!(await isDeployed(rpc, programId, 'finalized'))) {
+      process.stdout.write('.');
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+    console.log(' done');
   }
 
   // ---- 2. Mint + initialize, atomically -------------------------------------
@@ -246,8 +253,8 @@ async function main() {
   } else {
     const data = (await rpc.getAccountInfo(config, { encoding: 'base64' }).send()).value!.data[0];
     const bytes = Buffer.from(data, 'base64');
-    // discriminator (8) | admin (32) | usdc_mint (32) | cusdc_mint (32) | ...
-    cusdcMint = address(getBase58Decoder().decode(bytes.subarray(72, 104)));
+    // type (1) | admin (32) | usdc_mint (32) | cusdc_mint (32) | ...  (programs/vault/src/state.rs)
+    cusdcMint = address(getBase58Decoder().decode(bytes.subarray(65, 97)));
     console.log(`Vault already initialized; cUSDC mint ${cusdcMint}`);
   }
 
@@ -276,12 +283,20 @@ function websocketUrl(rpcUrl: string): string {
   return u.toString();
 }
 
-async function isDeployed(rpc: ReturnType<typeof createSolanaRpc>, programId: Address) {
-  const info = (await rpc.getAccountInfo(programId, { encoding: 'base64' }).send()).value;
+async function isDeployed(
+  rpc: ReturnType<typeof createSolanaRpc>,
+  programId: Address,
+  commitment: 'confirmed' | 'finalized' = 'confirmed',
+) {
+  const info = (await rpc.getAccountInfo(programId, { encoding: 'base64', commitment }).send())
+    .value;
   return !!info?.executable;
 }
 
-/** Builds vault.initialize from the IDL, so account order always matches the program. */
+/**
+ * vault `Initialize`: tag 0, no arguments. Account order and flags follow
+ * programs/vault/src/processor/initialize.rs.
+ */
 function initializeInstruction(
   programId: Address,
   a: {
@@ -293,34 +308,23 @@ function initializeInstruction(
     programData: Address;
   },
 ): Instruction {
-  const idl = JSON.parse(readFileSync(IDL_PATH, 'utf8'));
-  const ix = idl.instructions.find((i: { name: string }) => i.name === 'initialize');
-  const discriminator: number[] = ix.discriminator ?? [
-    ...createHash('sha256').update('global:initialize').digest().subarray(0, 8),
-  ];
-  const byName: Record<string, Address> = {
-    admin: a.admin.address,
-    config: a.config,
-    usdc_mint: a.usdcMint,
-    cusdc_mint: a.cusdcMint,
-    usdc_reserve: a.reserve,
-    program: programId,
-    program_data: a.programData,
-    token_program: TOKEN_PROGRAM,
-    associated_token_program: ATA_PROGRAM,
-    system_program: SYSTEM_PROGRAM,
-  };
+  const ro = (address: Address) => ({ address, role: AccountRole.READONLY });
+  const rw = (address: Address) => ({ address, role: AccountRole.WRITABLE });
   return {
     programAddress: programId,
-    data: Uint8Array.from(discriminator),
-    accounts: ix.accounts.map((acc: { name: string; writable?: boolean; signer?: boolean }) => {
-      const addr = byName[acc.name];
-      if (!addr) throw new Error(`IDL account ${acc.name} has no mapping`);
-      if (acc.signer) {
-        return { address: addr, role: AccountRole.WRITABLE_SIGNER, signer: a.admin };
-      }
-      return { address: addr, role: acc.writable ? AccountRole.WRITABLE : AccountRole.READONLY };
-    }),
+    data: Uint8Array.of(0),
+    accounts: [
+      { address: a.admin.address, role: AccountRole.WRITABLE_SIGNER, signer: a.admin },
+      rw(a.config),
+      ro(a.usdcMint),
+      ro(a.cusdcMint),
+      rw(a.reserve),
+      ro(programId),
+      ro(a.programData),
+      ro(TOKEN_PROGRAM),
+      ro(ATA_PROGRAM),
+      ro(SYSTEM_PROGRAM),
+    ],
   } as Instruction;
 }
 
@@ -344,7 +348,10 @@ async function sendTx(
     rpc,
     rpcSubscriptions,
   } as Parameters<Factory>[0]);
-  await sendAndConfirm(signed as Parameters<typeof sendAndConfirm>[0], { commitment: 'confirmed' });
+  await sendAndConfirm(signed as Parameters<typeof sendAndConfirm>[0], {
+    commitment: 'confirmed',
+    preflightCommitment: 'confirmed',
+  });
   return getSignatureFromTransaction(signed);
 }
 
