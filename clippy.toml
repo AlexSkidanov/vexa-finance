@@ -1,0 +1,3 @@
+# Anchor instruction handlers take one argument per account plus instruction
+# data; the default threshold of 7 trips on every non-trivial handler.
+too-many-arguments-threshold = 12

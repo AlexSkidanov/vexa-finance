@@ -1,0 +1,32 @@
+# Dependabot configuration for Vexa.
+#
+# We run *security* updates only. Version-update PRs are disabled with
+# `open-pull-requests-limit: 0`; security updates are driven by published
+# advisories and are not affected by that limit.
+#
+# Crypto and on-chain dependencies (@solana/*, anchor-*, spl-*, near-*) are
+# upgraded by hand, because a silent minor bump in proof generation or account
+# layouts can break confidential transfers in ways unit tests won't catch.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    groups:
+      npm-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  - package-ecosystem: cargo
+    directories: ["/programs/*", "/contracts/*"]
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0

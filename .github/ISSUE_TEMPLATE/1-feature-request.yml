@@ -1,0 +1,21 @@
+name: Feature request
+description: Suggest an idea or an improvement.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How you'd like it to work. API shapes and examples are welcome.
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy considerations
+      description: Does this touch amounts, keys, view keys or stealth routing? What could leak?
