@@ -1,0 +1,40 @@
+{
+  "name": "@vexa/core",
+  "version": "0.1.0",
+  "description": "Shared types, schemas and crypto helpers for Vexa",
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./crypto": {
+      "types": "./dist/crypto/index.d.ts",
+      "import": "./dist/crypto/index.js",
+      "require": "./dist/crypto/index.cjs"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.0.0",
+    "zod": "^4.1.0"
+  },
+  "peerDependencies": {
+    "@solana/zk-sdk": "^0.5.3"
+  },
+  "peerDependenciesMeta": {
+    "@solana/zk-sdk": { "optional": true }
+  },
+  "devDependencies": {
+    "@solana/zk-sdk": "0.5.3"
+  }
+}
