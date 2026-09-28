@@ -1,0 +1,38 @@
+{
+  "name": "@vexa/sdk",
+  "version": "0.1.0",
+  "description": "Typed client for the Vexa API",
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@vexa/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "@solana/zk-sdk": "^0.5.3"
+  },
+  "devDependencies": {
+    "@noble/curves": "^2.4.0",
+    "@solana/zk-sdk": "0.5.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AlexSkidanov/vexa-finance.git",
+    "directory": "packages/sdk"
+  }
+}

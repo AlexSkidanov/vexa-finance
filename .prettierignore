@@ -1,0 +1,10 @@
+node_modules
+dist
+target
+.anchor
+pnpm-lock.yaml
+CHANGELOG.md
+CODE_OF_CONDUCT.md
+LICENSE-*
+programs/vault/target
+programs/vault/idl

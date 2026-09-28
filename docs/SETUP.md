@@ -16,15 +16,14 @@ Secrets never leave `.env` except into Railway and GitHub Actions secrets. `.env
 
 ## 0. Local toolchain
 
-| Tool | Install | Needed for |
-| --- | --- | --- |
-| Node 20+ | `brew install node` | everything |
-| pnpm 9 | `corepack enable` | everything |
-| Solana CLI | `sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"` | keypairs, airdrops, deploys |
-| Rust | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` | vault program, NEAR contract |
-| Anchor (via avm) | `cargo install --git https://github.com/coral-xyz/anchor avm --force && avm install latest && avm use latest` | Phase 1 |
-| near-cli-rs | `npm i -g near-cli-rs` | NEAR account below |
-| cargo-near | `cargo install --locked cargo-near` | Phase 3 |
+| Tool        | Install                                                           | Needed for                   |
+| ----------- | ----------------------------------------------------------------- | ---------------------------- |
+| Node 20+    | `brew install node`                                               | everything                   |
+| pnpm 9      | `corepack enable`                                                 | everything                   |
+| Solana CLI  | `sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"`   | keypairs, airdrops, deploys  |
+| Rust        | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` | vault program, NEAR contract |
+| near-cli-rs | `npm i -g near-cli-rs`                                            | NEAR account below           |
+| cargo-near  | `cargo install --locked cargo-near`                               | Phase 3                      |
 
 ---
 
@@ -36,11 +35,11 @@ Run three times and paste one value into each:
 openssl rand -hex 32
 ```
 
-| Variable | Value |
-| --- | --- |
-| `API_KEY_ENCRYPTION_KEY` | 1st output. HMAC pepper for hashing `vx_test_` / `vx_live_` API keys. |
-| `WEBHOOK_SIGNING_SECRET` | 2nd output. Master secret for outbound webhook signatures. |
-| `VIEW_KEY_ENCRYPTION_KEY` | 3rd output. Wraps stored view keys. Must differ from the first. |
+| Variable                  | Value                                                                 |
+| ------------------------- | --------------------------------------------------------------------- |
+| `API_KEY_ENCRYPTION_KEY`  | 1st output. HMAC pepper for hashing `vx_test_` / `vx_live_` API keys. |
+| `WEBHOOK_SIGNING_SECRET`  | 2nd output. Master secret for outbound webhook signatures.            |
+| `VIEW_KEY_ENCRYPTION_KEY` | 3rd output. Wraps stored view keys. Must differ from the first.       |
 
 Rotating any of these later invalidates existing API keys, webhook secrets, or view keys respectively, so generate once and keep them.
 
@@ -48,10 +47,10 @@ Rotating any of these later invalidates existing API keys, webhook secrets, or v
 
 WebAuthn (passkeys):
 
-| Variable | Local | Production |
-| --- | --- | --- |
-| `WEBAUTHN_RP_ID` | `localhost` | `vexa.finance` |
-| `WEBAUTHN_RP_NAME` | `Vexa` | `Vexa` |
+| Variable           | Local                   | Production                                      |
+| ------------------ | ----------------------- | ----------------------------------------------- |
+| `WEBAUTHN_RP_ID`   | `localhost`             | `vexa.finance`                                  |
+| `WEBAUTHN_RP_NAME` | `Vexa`                  | `Vexa`                                          |
 | `WEBAUTHN_ORIGINS` | `http://localhost:3000` | `https://vexa.finance,https://app.vexa.finance` |
 
 The RP ID must be the origin's hostname or a parent of it. Passkeys registered under `localhost` will not work on `vexa.finance`.
@@ -125,14 +124,14 @@ Note both pubkeys (`solana-keygen pubkey ~/.config/vexa/fee-payer.json`).
 
 Send real SOL from an exchange or your own wallet (Phantom, Solflare) to each pubkey:
 
-| Key | Send | What it covers |
-| --- | --- | --- |
+| Key       | Send         | What it covers                                                                                                                              |
+| --------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | Fee payer | **0.05 SOL** | Tx fees (~0.000005 SOL/signature) plus rent for about 10 sponsored confidential token accounts (~0.004 SOL each) during setup and e2e tests |
-| Admin | **0.02 SOL** | Rent for the cUSDC mint, vault config, and vault USDC token account |
+| Admin     | **0.02 SOL** | Rent for the cUSDC mint, vault config, and vault USDC token account                                                                         |
 
 `check-env` fails below these amounts. Override with `FEE_PAYER_MIN_SOL` / `ADMIN_MIN_SOL`. It also simulates a call to the ZK ElGamal proof program to confirm confidential transfers run on mainnet; that check needs the fee payer to hold some SOL.
 
-**Later, not now:** the Phase 1 program deploy is the one large cost. Solana charges rent for the program's bytecode: **~0.007 SOL per KB** of the compiled `vault.so` (a lean Anchor program is roughly 150–250 KB, so ~1–1.75 SOL). This is a refundable deposit, not a fee: `solana program close` returns it. We'll build with size optimizations, print the exact figure from `solana rent <bytes>` after the build, and you send only that to the admin key before deploying.
+**Later, not now:** the vault program deploy is the one large cost. Solana charges refundable rent for the program's bytecode, about 0.0051 SOL per KB on mainnet today. The current 36 KB build needs **0.183 SOL** of rent plus about 0.005 SOL of fees and account rent, **≈ 0.188 SOL** in total. `pnpm deploy:vault` prints the exact figure from live rent prices before anything is sent, and `solana program close` returns the rent if the program is ever retired.
 
 ### USDC
 
@@ -141,12 +140,12 @@ Send real SOL from an exchange or your own wallet (Phantom, Solflare) to each pu
 
 ### Produced later (leave blank)
 
-| Variable | Produced by |
-| --- | --- |
-| `VAULT_PROGRAM_ID` | `anchor deploy` in Phase 1 |
-| `CUSDC_MINT` | vault init script in Phase 1 |
-| `TREASURY_OWNER_PUBKEY` | Phase 2 (fee treasury) |
-| `VEXA_TOKEN_MINT` | Phase 3 (~0.0015 SOL mint rent) |
+| Variable                | Produced by                     |
+| ----------------------- | ------------------------------- |
+| `VAULT_PROGRAM_ID`      | `pnpm deploy:vault` in Phase 1  |
+| `CUSDC_MINT`            | vault init script in Phase 1    |
+| `TREASURY_OWNER_PUBKEY` | Phase 2 (fee treasury)          |
+| `VEXA_TOKEN_MINT`       | Phase 3 (~0.0015 SOL mint rent) |
 
 ---
 
@@ -155,19 +154,23 @@ Send real SOL from an exchange or your own wallet (Phantom, Solflare) to each pu
 The deployer needs a **named** account (e.g. `vexa-deployer.near`), because Phase 3 deploys the policy contract to a sub-account of it (`policy.vexa-deployer.near`).
 
 **Option A: wallet (easiest)**
+
 1. Open **meteorwallet.app** (or **app.mynearwallet.com**) → **Create new wallet** → choose the name `vexa-deployer` → finish setup.
 2. Fund it with **0.1 NEAR** from an exchange (withdraw on the **NEAR** network, to `vexa-deployer.near`).
 3. Export the key: **Settings → Security & Recovery → Export private key** → copy the `ed25519:...` value.
 
 **Option B: CLI, if you already have a funded `.near` account**
+
 ```bash
 near account create-account fund-myself vexa-deployer.near '0.1 NEAR' \
   autogenerate-new-keypair save-to-legacy-keychain \
   sign-as <your-existing-account>.near network-config mainnet sign-with-keychain send
 ```
+
 The key lands in `~/.near-credentials/mainnet/vexa-deployer.near.json` → `private_key`.
 
 Then set:
+
 - **`NEAR_DEPLOYER_ACCOUNT_ID`**: `vexa-deployer.near`
 - **`NEAR_DEPLOYER_PRIVATE_KEY`**: the `ed25519:...` key. It must be a full-access key; `check-env` verifies this on-chain.
 - **`NEAR_RPC_URL`**: keep `https://rpc.mainnet.fastnear.com`.
@@ -218,6 +221,33 @@ The code lives at **github.com/AlexSkidanov/vexa-finance**. Pushing from your ma
 
 ---
 
+## 11. Deploying the vault
+
+```bash
+pnpm build:vault      # cargo build-sbf → target/deploy/vault.so
+pnpm deploy:vault     # dry run: prints the plan and the exact SOL the admin needs
+pnpm deploy:vault --execute
+```
+
+The dry run reads rent prices from the cluster and compares them against the admin balance. Almost all of the cost is the program's rent deposit (about 0.0051 SOL per KB of `vault.so`), which is refunded if the program is ever closed with `solana program close`.
+
+`--execute` deploys with the admin key as upgrade authority, then creates the cUSDC mint and initializes the vault in one transaction, and writes `VAULT_PROGRAM_ID` and `CUSDC_MINT` into `.env`. It's safe to rerun: finished steps are skipped. Afterwards, `pnpm check-env` verifies the program and the mint on-chain.
+
+After deploying, move the program's upgrade authority to a dedicated key that never touches a server or a chat:
+
+```bash
+solana-keygen new -o ~/.config/vexa/upgrade-authority.json
+solana program set-upgrade-authority <VAULT_PROGRAM_ID> \
+  --upgrade-authority ~/.config/vexa/admin.json \
+  --new-upgrade-authority ~/.config/vexa/upgrade-authority.json -um
+```
+
+The upgrade authority can replace the program's code, so it's the most sensitive key in the system. Keep it offline; the admin key only needs to pause the vault and manage the mint's confidential-transfer settings.
+
+The program keypair lives at `target/deploy/vault-keypair.json` (gitignored). Keep a backup: losing it doesn't affect the deployed program, but it's needed to redeploy to the same address from scratch.
+
+---
+
 ## Checklist
 
 ```
@@ -230,4 +260,6 @@ The code lives at **github.com/AlexSkidanov/vexa-finance**. Pushing from your ma
 [ ] GitHub: AlexSkidanov/vexa-finance exists
 [ ] Railway: project + token
 [ ] pnpm check-env -> Result: PASS
+[ ] pnpm db:migrate
+[ ] pnpm build:vault && pnpm deploy:vault --execute
 ```
