@@ -7,6 +7,12 @@
     "node": ">=20"
   },
   "scripts": {
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "eslint . && prettier --check .",
+    "format": "prettier --write .",
+    "test": "turbo run test",
+    "dev": "turbo run dev --filter=@vexa/api",
     "check-env": "tsx scripts/check-env.ts"
   },
   "devDependencies": {
@@ -15,6 +21,13 @@
     "postgres": "^3.4.5",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
-    "zod": "^3.24.1"
+    "zod": "^3.24.1",
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.11.0",
+    "typescript-eslint": "^8.70.1",
+    "prettier": "^3.9.9",
+    "turbo": "^2.11.5",
+    "vitest": "^5.0.2",
+    "tsup": "^8.5.1"
   }
 }
