@@ -4,19 +4,17 @@
 
 #![allow(dead_code)]
 
-use anchor_lang::{
-    prelude::Pubkey,
-    solana_program::{instruction::Instruction, system_instruction, system_program},
-    AccountDeserialize, InstructionData, ToAccountMetas,
-};
 use litesvm::LiteSVM;
+use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
 use solana_message::{Message, VersionedMessage};
+use solana_pubkey::Pubkey;
 use solana_signer::Signer;
+use solana_system_interface::{instruction as system_instruction, program as system_program};
 use solana_transaction::versioned::VersionedTransaction;
 // Proofs and keys come from zk-sdk 7, matching mainnet's verifier. The Token-2022
-// builders pinned by anchor-spl still use zk-sdk 4 "pod" types; the byte layout is
-// identical, so values cross between the two through their raw bytes.
+// builders in spl-token-2022-interface 2.x still use zk-sdk 4 "pod" types; the byte
+// layout is identical, so values cross between the two through their raw bytes.
 use spl_associated_token_account_interface::address::get_associated_token_address_with_program_id;
 use spl_token_2022_interface::{
     extension::{
@@ -57,8 +55,22 @@ pub struct User {
     pub ae: AeKey,
 }
 
+pub const LOADER_UPGRADEABLE: Pubkey =
+    Pubkey::from_str_const("BPFLoaderUpgradeab1e11111111111111111111111");
+
 pub fn config_pda() -> Pubkey {
-    Pubkey::find_program_address(&[vault::CONFIG_SEED], &vault::id()).0
+    Pubkey::find_program_address(&[vault::state::CONFIG_SEED], &vault::ID).0
+}
+
+/// A vault instruction: tag byte + little-endian args (see `vault::instruction`).
+pub fn vault_ix(
+    tag: vault::instruction::VaultInstruction,
+    args: &[u8],
+    accounts: Vec<AccountMeta>,
+) -> Instruction {
+    let mut data = vec![tag as u8];
+    data.extend_from_slice(args);
+    Instruction { program_id: vault::ID, accounts, data }
 }
 
 pub fn send(
@@ -82,17 +94,13 @@ pub fn send(
 }
 
 /// Loads the vault as an upgradeable program whose upgrade authority is
-/// `admin`, the way it looks on mainnet after `anchor deploy`.
+/// `admin`, the way it looks on mainnet after `solana program deploy`.
 pub fn load_vault(svm: &mut LiteSVM, admin: &Pubkey) {
     let bytes = include_bytes!("../../../../target/deploy/vault.so");
-    svm.add_program(vault::id(), bytes).unwrap();
+    svm.add_program(vault::ID, bytes).unwrap();
 
     // Patch ProgramData metadata: enum tag (4) | slot (8) | Option<Pubkey> (1 + 32).
-    let programdata = Pubkey::find_program_address(
-        &[vault::id().as_ref()],
-        &anchor_lang::solana_program::bpf_loader_upgradeable::id(),
-    )
-    .0;
+    let programdata = programdata();
     let mut account = svm.get_account(&programdata).unwrap();
     account.data[12] = 1;
     account.data[13..45].copy_from_slice(admin.as_ref());
@@ -100,11 +108,7 @@ pub fn load_vault(svm: &mut LiteSVM, admin: &Pubkey) {
 }
 
 pub fn programdata() -> Pubkey {
-    Pubkey::find_program_address(
-        &[vault::id().as_ref()],
-        &anchor_lang::solana_program::bpf_loader_upgradeable::id(),
-    )
-    .0
+    Pubkey::find_program_address(&[vault::ID.as_ref()], &LOADER_UPGRADEABLE).0
 }
 
 pub fn create_usdc_mint(svm: &mut LiteSVM, payer: &Keypair, authority: &Pubkey) -> Pubkey {
@@ -190,26 +194,26 @@ pub fn create_cusdc_mint(svm: &mut LiteSVM, payer: &Keypair, opts: CusdcOptions)
 
 pub fn initialize_ix(admin: &Pubkey, usdc_mint: &Pubkey, cusdc_mint: &Pubkey) -> Instruction {
     let config = config_pda();
-    Instruction::new_with_bytes(
-        vault::id(),
-        &vault::instruction::Initialize {}.data(),
-        vault::accounts::Initialize {
-            admin: *admin,
-            config,
-            usdc_mint: *usdc_mint,
-            cusdc_mint: *cusdc_mint,
-            usdc_reserve: get_associated_token_address_with_program_id(
-                &config,
-                usdc_mint,
-                &spl_token_interface::id(),
-            ),
-            program: vault::id(),
-            program_data: programdata(),
-            token_program: spl_token_interface::id(),
-            associated_token_program: spl_associated_token_account_interface::program::id(),
-            system_program: system_program::ID,
-        }
-        .to_account_metas(None),
+    let reserve = get_associated_token_address_with_program_id(
+        &config,
+        usdc_mint,
+        &spl_token_interface::id(),
+    );
+    vault_ix(
+        vault::instruction::VaultInstruction::Initialize,
+        &[],
+        vec![
+            AccountMeta::new(*admin, true),
+            AccountMeta::new(config, false),
+            AccountMeta::new_readonly(*usdc_mint, false),
+            AccountMeta::new_readonly(*cusdc_mint, false),
+            AccountMeta::new(reserve, false),
+            AccountMeta::new_readonly(vault::ID, false),
+            AccountMeta::new_readonly(programdata(), false),
+            AccountMeta::new_readonly(spl_token_interface::id(), false),
+            AccountMeta::new_readonly(spl_associated_token_account_interface::program::id(), false),
+            AccountMeta::new_readonly(system_program::ID, false),
+        ],
     )
 }
 
@@ -302,64 +306,72 @@ impl Env {
     pub fn configure(&mut self, user: &User) -> Result<(), String> {
         let proof = build_pubkey_validity_proof_data(&user.elgamal).unwrap();
         let proof_ix = ProofInstruction::VerifyPubkeyValidity.encode_verify_proof(None, &proof);
-        let zero = user.ae.encrypt(0).to_bytes();
-        let configure_ix = Instruction::new_with_bytes(
-            vault::id(),
-            &vault::instruction::ConfigureConfidentialAccount {
-                decryptable_zero_balance: zero,
-                proof_instruction_offset: -1,
-            }
-            .data(),
-            vault::accounts::ConfigureConfidentialAccount {
-                owner: user.kp.pubkey(),
-                config: self.config,
-                cusdc_mint: self.cusdc_mint,
-                token_account: user.cusdc,
-                instructions: solana_instructions_sysvar_id(),
-                token_program: spl_token_2022_interface::id(),
-                associated_token_program: spl_associated_token_account_interface::program::id(),
-                system_program: system_program::ID,
-            }
-            .to_account_metas(None),
-        );
+        let configure_ix =
+            self.configure_ix(&user.kp.pubkey(), &user.cusdc, &user.ae.encrypt(0).to_bytes(), -1);
         send(&mut self.svm, &[proof_ix, configure_ix], &user.kp, &[])
     }
 
+    pub fn configure_ix(
+        &self,
+        owner: &Pubkey,
+        token_account: &Pubkey,
+        zero_balance: &[u8; 36],
+        offset: i8,
+    ) -> Instruction {
+        let mut args = zero_balance.to_vec();
+        args.push(offset as u8);
+        vault_ix(
+            vault::instruction::VaultInstruction::ConfigureConfidentialAccount,
+            &args,
+            vec![
+                AccountMeta::new(*owner, true),
+                AccountMeta::new_readonly(self.config, false),
+                AccountMeta::new_readonly(self.cusdc_mint, false),
+                AccountMeta::new(*token_account, false),
+                AccountMeta::new_readonly(solana_instructions_sysvar_id(), false),
+                AccountMeta::new_readonly(spl_token_2022_interface::id(), false),
+                AccountMeta::new_readonly(
+                    spl_associated_token_account_interface::program::id(),
+                    false,
+                ),
+                AccountMeta::new_readonly(system_program::ID, false),
+            ],
+        )
+    }
+
     pub fn deposit_ix(&self, user: &User, amount: u64) -> Instruction {
-        Instruction::new_with_bytes(
-            vault::id(),
-            &vault::instruction::Deposit { amount }.data(),
-            vault::accounts::Deposit {
-                owner: user.kp.pubkey(),
-                config: self.config,
-                usdc_mint: self.usdc_mint,
-                cusdc_mint: self.cusdc_mint,
-                owner_usdc: user.usdc,
-                usdc_reserve: self.reserve,
-                owner_cusdc: user.cusdc,
-                token_program: spl_token_interface::id(),
-                token_2022_program: spl_token_2022_interface::id(),
-            }
-            .to_account_metas(None),
+        vault_ix(
+            vault::instruction::VaultInstruction::Deposit,
+            &amount.to_le_bytes(),
+            vec![
+                AccountMeta::new_readonly(user.kp.pubkey(), true),
+                AccountMeta::new_readonly(self.config, false),
+                AccountMeta::new_readonly(self.usdc_mint, false),
+                AccountMeta::new(self.cusdc_mint, false),
+                AccountMeta::new(user.usdc, false),
+                AccountMeta::new(self.reserve, false),
+                AccountMeta::new(user.cusdc, false),
+                AccountMeta::new_readonly(spl_token_interface::id(), false),
+                AccountMeta::new_readonly(spl_token_2022_interface::id(), false),
+            ],
         )
     }
 
     pub fn withdraw_ix(&self, user: &User, destination: &Pubkey, amount: u64) -> Instruction {
-        Instruction::new_with_bytes(
-            vault::id(),
-            &vault::instruction::Withdraw { amount }.data(),
-            vault::accounts::Withdraw {
-                owner: user.kp.pubkey(),
-                config: self.config,
-                usdc_mint: self.usdc_mint,
-                cusdc_mint: self.cusdc_mint,
-                owner_cusdc: user.cusdc,
-                usdc_reserve: self.reserve,
-                destination: *destination,
-                token_program: spl_token_interface::id(),
-                token_2022_program: spl_token_2022_interface::id(),
-            }
-            .to_account_metas(None),
+        vault_ix(
+            vault::instruction::VaultInstruction::Withdraw,
+            &amount.to_le_bytes(),
+            vec![
+                AccountMeta::new_readonly(user.kp.pubkey(), true),
+                AccountMeta::new_readonly(self.config, false),
+                AccountMeta::new_readonly(self.usdc_mint, false),
+                AccountMeta::new(self.cusdc_mint, false),
+                AccountMeta::new(user.cusdc, false),
+                AccountMeta::new(self.reserve, false),
+                AccountMeta::new(*destination, false),
+                AccountMeta::new_readonly(spl_token_interface::id(), false),
+                AccountMeta::new_readonly(spl_token_2022_interface::id(), false),
+            ],
         )
     }
 
@@ -379,8 +391,9 @@ impl Env {
     }
 
     pub fn usdc_balance(&self, account: &Pubkey) -> u64 {
+        // Token account layout: mint (32) | owner (32) | amount (8, LE) | ...
         let acc = self.svm.get_account(account).unwrap();
-        spl_token_interface::state::Account::unpack_from_slice_compat(&acc.data)
+        u64::from_le_bytes(acc.data[64..72].try_into().unwrap())
     }
 
     pub fn cusdc_state(&self, user: &User) -> (u64, ConfidentialTransferAccount) {
@@ -394,9 +407,17 @@ impl Env {
         StateWithExtensions::<Mint2022>::unpack(&acc.data).unwrap().base.supply
     }
 
-    pub fn config_state(&self) -> vault::VaultConfig {
-        let acc = self.svm.get_account(&self.config).unwrap();
-        vault::VaultConfig::try_deserialize(&mut acc.data.as_slice()).unwrap()
+    pub fn config_state(&self) -> ConfigView {
+        let d = self.svm.get_account(&self.config).unwrap().data;
+        assert_eq!(d.len(), vault::state::CONFIG_LEN);
+        let key = |o: usize| Pubkey::new_from_array(d[o..o + 32].try_into().unwrap());
+        ConfigView {
+            admin: key(1),
+            usdc_mint: key(33),
+            cusdc_mint: key(65),
+            usdc_reserve: key(97),
+            paused: d[129] != 0,
+        }
     }
 }
 
@@ -429,13 +450,16 @@ pub fn solana_instructions_sysvar_id() -> Pubkey {
     solana_instructions_sysvar::ID
 }
 
-// Small shim so the tests read naturally regardless of the Pack trait's location.
-trait UnpackCompat {
-    fn unpack_from_slice_compat(data: &[u8]) -> u64;
+/// The vault config, decoded from the layout documented in `vault::state`.
+pub struct ConfigView {
+    pub admin: Pubkey,
+    pub usdc_mint: Pubkey,
+    pub cusdc_mint: Pubkey,
+    pub usdc_reserve: Pubkey,
+    pub paused: bool,
 }
-impl UnpackCompat for spl_token_interface::state::Account {
-    fn unpack_from_slice_compat(data: &[u8]) -> u64 {
-        // Token account layout: mint (32) | owner (32) | amount (8, LE) | ...
-        u64::from_le_bytes(data[64..72].try_into().unwrap())
-    }
+
+/// How a vault error shows up in a failed transaction.
+pub fn code(e: vault::error::VaultError) -> String {
+    format!("Custom({})", e as u32)
 }
