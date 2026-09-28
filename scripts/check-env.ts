@@ -730,7 +730,7 @@ async function probeSolana(): Promise<Row[]> {
 
   // Keypairs + balances
   const minSol = Number(v('FEE_PAYER_MIN_SOL') || 0.05);
-  const adminMinSol = Number(v('ADMIN_MIN_SOL') || 0.02);
+  const adminMinSol = Number(v('ADMIN_MIN_SOL') || 0.005);
   const feePayer = valid.has('SOLANA_FEE_PAYER_KEYPAIR')
     ? solanaKeypairPubkey(v('SOLANA_FEE_PAYER_KEYPAIR'))
     : null;
