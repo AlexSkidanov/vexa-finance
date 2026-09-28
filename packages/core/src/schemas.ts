@@ -55,6 +55,7 @@ export type Session = z.infer<typeof Session>;
 
 /** WebAuthn payloads are validated by @simplewebauthn/server; here we only check the envelope. */
 export const PasskeyRegistrationVerifyRequest = z.object({
+  challengeId: z.uuid(),
   response: z.record(z.string(), z.unknown()),
   name: z.string().trim().min(1).max(64).optional(),
 });
@@ -130,8 +131,11 @@ export const ApiKeySummary = z.object({
 });
 export type ApiKeySummary = z.infer<typeof ApiKeySummary>;
 
-/** Returned exactly once, at creation. The secret is never retrievable again. */
+/**
+ * Returned at creation. `secret` is present exactly once: an idempotent replay
+ * of the same request returns the summary without it.
+ */
 export const CreatedApiKey = ApiKeySummary.extend({
-  secret: z.string().refine(isApiKey),
+  secret: z.string().refine(isApiKey).optional(),
 });
 export type CreatedApiKey = z.infer<typeof CreatedApiKey>;
