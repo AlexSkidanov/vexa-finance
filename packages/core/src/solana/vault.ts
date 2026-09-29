@@ -20,6 +20,7 @@ export const VaultInstruction = {
   Withdraw: 3,
   SetPaused: 4,
   SetAdmin: 5,
+  SetFees: 6,
 } as const;
 
 export interface VaultAccounts {
@@ -28,10 +29,19 @@ export interface VaultAccounts {
   usdcMint: Address;
   cusdcMint: Address;
   usdcReserve: Address;
+  /** The fee schedule PDA, `["fees"]`. */
+  fees: Address;
+  /** The treasury's USDC account, as recorded in the fee schedule. */
+  treasury: Address;
 }
 
 const ro = (address: Address) => ({ address, role: AccountRole.READONLY });
 const rw = (address: Address) => ({ address, role: AccountRole.WRITABLE });
+
+/** Trailing accounts of Deposit and Withdraw: schedule, treasury, optional $VEXA. */
+function feeAccounts(vault: VaultAccounts, vexaAccount?: Address) {
+  return [ro(vault.fees), rw(vault.treasury), ...(vexaAccount ? [ro(vexaAccount)] : [])];
+}
 
 function u64(amount: bigint): Uint8Array {
   const out = new Uint8Array(8);
@@ -78,7 +88,10 @@ export function depositInstruction(input: {
   owner: TransactionSigner;
   ownerUsdc: Address;
   ownerCusdc: Address;
+  /** USDC taken from the owner. The fee comes out of it; the rest is minted. */
   amount: bigint;
+  /** The owner's $VEXA account, for a fee discount. */
+  vexaAccount?: Address;
 }): Instruction {
   return {
     programAddress: input.vault.program ?? VAULT_PROGRAM,
@@ -92,6 +105,7 @@ export function depositInstruction(input: {
       rw(input.ownerCusdc),
       ro(TOKEN_PROGRAM),
       ro(TOKEN_2022_PROGRAM),
+      ...feeAccounts(input.vault, input.vexaAccount),
     ],
     data: new Uint8Array([VaultInstruction.Deposit, ...u64(input.amount)]),
   } as Instruction;
@@ -102,7 +116,9 @@ export function withdrawInstruction(input: {
   owner: TransactionSigner;
   ownerCusdc: Address;
   destination: Address;
+  /** cUSDC burned. The destination receives it less the fee. */
   amount: bigint;
+  vexaAccount?: Address;
 }): Instruction {
   return {
     programAddress: input.vault.program ?? VAULT_PROGRAM,
@@ -116,7 +132,33 @@ export function withdrawInstruction(input: {
       rw(input.destination),
       ro(TOKEN_PROGRAM),
       ro(TOKEN_2022_PROGRAM),
+      ...feeAccounts(input.vault, input.vexaAccount),
     ],
     data: new Uint8Array([VaultInstruction.Withdraw, ...u64(input.amount)]),
+  } as Instruction;
+}
+
+/**
+ * Admin only: creates or replaces the fee schedule. `terms` comes from
+ * `encodeFeeTerms`.
+ */
+export function setFeesInstruction(input: {
+  program?: Address;
+  admin: TransactionSigner;
+  config: Address;
+  fees: Address;
+  treasury: Address;
+  terms: Uint8Array;
+}): Instruction {
+  return {
+    programAddress: input.program ?? VAULT_PROGRAM,
+    accounts: [
+      { address: input.admin.address, role: AccountRole.WRITABLE_SIGNER, signer: input.admin },
+      ro(input.config),
+      rw(input.fees),
+      ro(input.treasury),
+      ro(SYSTEM_PROGRAM),
+    ],
+    data: new Uint8Array([VaultInstruction.SetFees, ...input.terms]),
   } as Instruction;
 }

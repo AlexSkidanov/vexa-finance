@@ -52,6 +52,10 @@ import {
   TOKEN_PROGRAM,
   VAULT_PROGRAM,
   type RentTable,
+  encodeFeeTerms,
+  findFeeSchedule,
+  setFeesInstruction,
+  type FeeSchedule,
   type VaultAccounts,
 } from '../../src/solana/index.js';
 
@@ -84,6 +88,8 @@ export interface Testbed {
   feePayer: KeyPairSigner;
   admin: KeyPairSigner;
   vault: VaultAccounts & { program: Address };
+  /** What the vault charges; the launch schedule. */
+  feeSchedule: FeeSchedule;
   rent: RentTable;
   blockhash(): { blockhash: ReturnType<LiteSVM['latestBlockhash']>; lastValidBlockHeight: bigint };
   account(address: Address): Uint8Array | null;
@@ -204,12 +210,42 @@ export async function createTestbed(): Promise<Testbed> {
     } as Instruction,
   ]);
 
+  // The launch fee schedule: 0.10%, capped at 5 USDC, paid to a treasury.
+  const treasuryOwner = (await generateKeyPairSigner()).address;
+  const treasury = await findAta(treasuryOwner, usdcMint.address, TOKEN_PROGRAM);
+  const fees = await findFeeSchedule(VAULT_PROGRAM);
+  const feeSchedule: FeeSchedule = {
+    feeBps: 10,
+    feeCap: 5_000_000n,
+    treasury,
+    vexaMint: null,
+    tiers: [],
+  };
+  await sendDirect(admin, [
+    getCreateAssociatedTokenIdempotentInstruction({
+      payer: admin,
+      ata: treasury,
+      owner: treasuryOwner,
+      mint: usdcMint.address,
+      tokenProgram: TOKEN_PROGRAM,
+    }),
+    setFeesInstruction({
+      admin,
+      config,
+      fees,
+      treasury,
+      terms: encodeFeeTerms(feeSchedule),
+    }),
+  ]);
+
   const vault = {
     program: VAULT_PROGRAM,
     config,
     usdcMint: usdcMint.address,
     cusdcMint: cusdcMint.address,
     usdcReserve: reserve,
+    fees,
+    treasury,
   };
   const rent: RentTable = {
     confidentialAccount: svm.minimumBalanceForRentExemption(CONFIDENTIAL_ACCOUNT_SPACE),
@@ -238,6 +274,7 @@ export async function createTestbed(): Promise<Testbed> {
     feePayer,
     admin,
     vault,
+    feeSchedule,
     rent,
     blockhash,
     account,

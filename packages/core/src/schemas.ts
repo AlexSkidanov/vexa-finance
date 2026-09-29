@@ -196,7 +196,18 @@ export const ChainContext = z.object({
     usdcMint: z.string(),
     cusdcMint: z.string(),
     usdcReserve: z.string(),
+    fees: z.string(),
   }),
+  /** The vault's fee schedule; null until the admin sets one (money can't move before). */
+  feeSchedule: z
+    .object({
+      feeBps: z.number().int(),
+      feeCap: z.string(),
+      treasury: z.string(),
+      vexaMint: z.string().nullable(),
+      tiers: z.array(z.object({ minBalance: z.string(), discountBps: z.number().int() })),
+    })
+    .nullable(),
   auditorElgamalPubkey: z.string().nullable(),
   rent: z.object({
     confidentialAccount: z.string(),

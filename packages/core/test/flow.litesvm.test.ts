@@ -21,6 +21,7 @@ import {
   configurePlan,
   decodeConfidentialAccount,
   depositPlan,
+  quoteFee,
   transferPlan,
   withdrawPlan,
   type CompiledPlan,
@@ -90,8 +91,9 @@ describe.skipIf(!vaultBinaryExists())('money flow on LiteSVM', { timeout: 30_000
         ownerCusdc: w.cusdc,
         amount,
         expectedPendingBalanceCreditCounter: state(w).pendingBalanceCreditCounter + 1n,
+        // What lands is the amount less the vault's fee.
         newDecryptableAvailableBalance: w.keys.ae
-          .encrypt(available(w) + pending(w) + amount)
+          .encrypt(available(w) + pending(w) + amount - quoteFee(bed.feeSchedule, amount))
           .toBytes(),
       }),
     );
@@ -142,9 +144,12 @@ describe.skipIf(!vaultBinaryExists())('money flow on LiteSVM', { timeout: 30_000
     const alice = await onboard(100n * USDC);
     const bob = await onboard(0n);
 
+    // 0.10% of 50 USDC goes to the treasury.
     await deposit(alice, 50n * USDC);
-    expect(available(alice)).toBe(50n * USDC);
-    expect(bed.tokenAmount(bed.vault.usdcReserve)).toBe(50n * USDC);
+    const deposited = 50n * USDC - 50_000n;
+    expect(available(alice)).toBe(deposited);
+    expect(bed.tokenAmount(bed.vault.usdcReserve)).toBe(deposited);
+    expect(bed.tokenAmount(bed.vault.treasury)).toBe(50_000n);
 
     const amount = 12_500_000n;
     const feePayerBefore = bed.svm.getBalance(bed.feePayer.address)!;
@@ -160,7 +165,7 @@ describe.skipIf(!vaultBinaryExists())('money flow on LiteSVM', { timeout: 30_000
       for (const needle of needles) expect(indexOf(tx.messageBytes, needle)).toBe(-1);
     }
 
-    expect(available(alice)).toBe(50n * USDC - amount);
+    expect(available(alice)).toBe(deposited - amount);
     expect(pending(bob)).toBe(amount);
     expect(
       decryptTransferAmount(
@@ -196,9 +201,11 @@ describe.skipIf(!vaultBinaryExists())('money flow on LiteSVM', { timeout: 30_000
         rent: bed.rent,
       }),
     );
-    expect(bed.tokenAmount(destination)).toBe(10n * USDC);
-    expect(available(alice)).toBe(50n * USDC - amount - 10n * USDC);
-    expect(bed.tokenAmount(bed.vault.usdcReserve)).toBe(40n * USDC);
+    // The full 10 leaves the confidential balance; the destination gets it less 0.10%.
+    expect(bed.tokenAmount(destination)).toBe(10n * USDC - 10_000n);
+    expect(bed.tokenAmount(bed.vault.treasury)).toBe(60_000n);
+    expect(available(alice)).toBe(deposited - amount - 10n * USDC);
+    expect(bed.tokenAmount(bed.vault.usdcReserve)).toBe(deposited - 10n * USDC);
 
     // Bob makes the received funds spendable, then sends some back.
     await applyPending(bob);
@@ -206,7 +213,7 @@ describe.skipIf(!vaultBinaryExists())('money flow on LiteSVM', { timeout: 30_000
     await transfer(bob, alice, 2_500_000n);
     expect(available(bob)).toBe(10n * USDC);
     await applyPending(alice);
-    expect(available(alice)).toBe(50n * USDC - amount - 10n * USDC + 2_500_000n);
+    expect(available(alice)).toBe(deposited - amount - 10n * USDC + 2_500_000n);
 
     // Everything in cUSDC is backed: supply equals the reserve.
     const mint = bed.account(bed.vault.cusdcMint)!;

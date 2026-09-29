@@ -139,10 +139,12 @@ export function depositPlan(input: {
   owner: TransactionSigner;
   ownerUsdc: Address;
   ownerCusdc: Address;
+  /** USDC taken from the wallet, fee included. */
   amount: bigint;
+  vexaAccount?: Address;
   /** The account's credit counter after this deposit lands (current + 1). */
   expectedPendingBalanceCreditCounter: bigint;
-  /** AE encryption of (available + everything pending + amount). */
+  /** AE encryption of (available + everything pending + amount − fee). */
   newDecryptableAvailableBalance: Uint8Array;
 }): Plan {
   return {
@@ -158,6 +160,7 @@ export function depositPlan(input: {
               ownerUsdc: input.ownerUsdc,
               ownerCusdc: input.ownerCusdc,
               amount: input.amount,
+              vexaAccount: input.vexaAccount,
             }),
             getApplyConfidentialPendingBalanceInstruction({
               token: input.ownerCusdc,
@@ -342,7 +345,9 @@ export interface WithdrawPlanInput {
    * permanent rent, which Vexa doesn't sponsor.
    */
   destination: Address;
+  /** cUSDC leaving the confidential balance; the destination gets it less the fee. */
   amount: bigint;
+  vexaAccount?: Address;
   decimals: number;
   proofs: {
     equalityProof: Uint8Array;
@@ -376,6 +381,7 @@ export async function withdrawPlan(input: WithdrawPlanInput): Promise<Plan> {
       ownerCusdc: input.ownerCusdc,
       destination: input.destination,
       amount: input.amount,
+      vexaAccount: input.vexaAccount,
     }),
     closeContextStateInstruction(equality.address, input.feePayer, input.feePayer),
     closeContextStateInstruction(range.address, input.feePayer, input.feePayer),
