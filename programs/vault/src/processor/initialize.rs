@@ -12,15 +12,9 @@
 //!   8. `[]`                 Associated Token program
 //!   9. `[]`                 System program
 
-use pinocchio::{
-    cpi::Signer,
-    error::ProgramError,
-    sysvars::{rent::Rent, Sysvar},
-    AccountView, Address, ProgramResult,
-};
-use pinocchio_system::instructions::{Allocate, Assign, CreateAccount, Transfer};
+use pinocchio::{cpi::Signer, error::ProgramError, AccountView, Address, ProgramResult};
 
-use super::{config_seeds, require_program, require_signer, require_writable};
+use super::{config_seeds, create_pda_account, require_program, require_signer, require_writable};
 use crate::{
     error::VaultError,
     state::{Config, CONFIG_LEN, CONFIG_SEED},
@@ -67,7 +61,7 @@ pub fn process(accounts: &mut [AccountView]) -> ProgramResult {
     let bump_seed = [bump];
     let seeds = config_seeds(&bump_seed);
     let signer = Signer::from(&seeds);
-    create_config_account(admin, config, &signer)?;
+    create_pda_account(admin, config, CONFIG_LEN, &signer)?;
 
     // The ATA program verifies the reserve is the canonical ATA of the config
     // PDA for USDC; if someone already created it, this is a no-op.
@@ -169,34 +163,4 @@ fn validate_cusdc_mint(mint: &AccountView, config: &Address, usdc_decimals: u8) 
         return Err(VaultError::AutoApproveDisabled.into());
     }
     Ok(())
-}
-
-/// Creates the config PDA. If someone has already sent lamports to the address
-/// (which would make CreateAccount fail and block initialization forever),
-/// tops it up and allocates and assigns it instead.
-fn create_config_account(
-    payer: &AccountView,
-    config: &AccountView,
-    signer: &Signer,
-) -> ProgramResult {
-    let rent = Rent::get()?.try_minimum_balance(CONFIG_LEN)?;
-    let signers = core::slice::from_ref(signer);
-
-    if config.lamports() == 0 {
-        return CreateAccount {
-            from: payer,
-            to: config,
-            lamports: rent,
-            space: CONFIG_LEN as u64,
-            owner: &ID,
-        }
-        .invoke_signed(signers);
-    }
-
-    let shortfall = rent.saturating_sub(config.lamports());
-    if shortfall > 0 {
-        Transfer { from: payer, to: config, lamports: shortfall }.invoke()?;
-    }
-    Allocate { account: config, space: CONFIG_LEN as u64 }.invoke_signed(signers)?;
-    Assign { account: config, owner: &ID }.invoke_signed(signers)
 }

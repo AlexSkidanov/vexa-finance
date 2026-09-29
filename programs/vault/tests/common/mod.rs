@@ -45,6 +45,9 @@ pub struct Env {
     pub cusdc_mint: Pubkey,
     pub config: Pubkey,
     pub reserve: Pubkey,
+    pub fees: Pubkey,
+    /// The treasury's USDC account, where fees land.
+    pub treasury: Pubkey,
 }
 
 pub struct User {
@@ -60,6 +63,40 @@ pub const LOADER_UPGRADEABLE: Pubkey =
 
 pub fn config_pda() -> Pubkey {
     Pubkey::find_program_address(&[vault::state::CONFIG_SEED], &vault::ID).0
+}
+
+pub fn fees_pda() -> Pubkey {
+    Pubkey::find_program_address(&[vault::fees::FEES_SEED], &vault::ID).0
+}
+
+/// `SetFees` args: fee_bps | fee_cap | vexa_mint | tier_count | tiers.
+pub fn set_fees_ix(
+    admin: &Pubkey,
+    treasury: &Pubkey,
+    fee_bps: u16,
+    fee_cap: u64,
+    vexa_mint: Option<Pubkey>,
+    tiers: &[(u64, u16)],
+) -> Instruction {
+    let mut args = fee_bps.to_le_bytes().to_vec();
+    args.extend_from_slice(&fee_cap.to_le_bytes());
+    args.extend_from_slice(vexa_mint.unwrap_or_default().as_ref());
+    args.push(tiers.len() as u8);
+    for (min_balance, discount_bps) in tiers {
+        args.extend_from_slice(&min_balance.to_le_bytes());
+        args.extend_from_slice(&discount_bps.to_le_bytes());
+    }
+    vault_ix(
+        vault::instruction::VaultInstruction::SetFees,
+        &args,
+        vec![
+            AccountMeta::new(*admin, true),
+            AccountMeta::new_readonly(config_pda(), false),
+            AccountMeta::new(fees_pda(), false),
+            AccountMeta::new_readonly(*treasury, false),
+            AccountMeta::new_readonly(system_program::ID, false),
+        ],
+    )
 }
 
 /// A vault instruction: tag byte + little-endian args (see `vault::instruction`).
@@ -217,8 +254,12 @@ pub fn initialize_ix(admin: &Pubkey, usdc_mint: &Pubkey, cusdc_mint: &Pubkey) ->
     )
 }
 
-/// A fresh SVM with mints created and the vault initialized.
+/// A fresh SVM with mints created, the vault initialized and a zero fee schedule.
 pub fn setup() -> Env {
+    setup_with(true)
+}
+
+pub fn setup_with(fee_schedule: bool) -> Env {
     let mut svm = LiteSVM::new();
     let admin = Keypair::new();
     svm.airdrop(&admin.pubkey(), 100_000_000_000).unwrap();
@@ -245,7 +286,39 @@ pub fn setup() -> Env {
         &usdc_mint,
         &spl_token_interface::id(),
     );
-    Env { svm, admin, usdc_mint, usdc_authority, cusdc_mint, config, reserve }
+
+    // A treasury, and a zero fee schedule so amounts in most tests stay round.
+    // Fee tests raise it with `set_fees_ix`.
+    let treasury_owner = Pubkey::new_unique();
+    let treasury = get_associated_token_address_with_program_id(
+        &treasury_owner,
+        &usdc_mint,
+        &spl_token_interface::id(),
+    );
+    let create_treasury =
+        spl_associated_token_account_interface::instruction::create_associated_token_account(
+            &admin.pubkey(),
+            &treasury_owner,
+            &usdc_mint,
+            &spl_token_interface::id(),
+        );
+    send(&mut svm, &[create_treasury], &admin, &[]).unwrap();
+    if fee_schedule {
+        let zero_fees = set_fees_ix(&admin.pubkey(), &treasury, 0, 0, None, &[]);
+        send(&mut svm, &[zero_fees], &admin, &[]).unwrap();
+    }
+
+    Env {
+        svm,
+        admin,
+        usdc_mint,
+        usdc_authority,
+        cusdc_mint,
+        config,
+        reserve,
+        fees: fees_pda(),
+        treasury,
+    }
 }
 
 impl Env {
@@ -340,7 +413,12 @@ impl Env {
     }
 
     pub fn deposit_ix(&self, user: &User, amount: u64) -> Instruction {
-        vault_ix(
+        self.deposit_ix_with(user, amount, None)
+    }
+
+    /// A deposit that presents a $VEXA account for a fee discount.
+    pub fn deposit_ix_with(&self, user: &User, amount: u64, vexa: Option<Pubkey>) -> Instruction {
+        let mut ix = vault_ix(
             vault::instruction::VaultInstruction::Deposit,
             &amount.to_le_bytes(),
             vec![
@@ -353,8 +431,12 @@ impl Env {
                 AccountMeta::new(user.cusdc, false),
                 AccountMeta::new_readonly(spl_token_interface::id(), false),
                 AccountMeta::new_readonly(spl_token_2022_interface::id(), false),
+                AccountMeta::new_readonly(self.fees, false),
+                AccountMeta::new(self.treasury, false),
             ],
-        )
+        );
+        ix.accounts.extend(vexa.map(|v| AccountMeta::new_readonly(v, false)));
+        ix
     }
 
     pub fn withdraw_ix(&self, user: &User, destination: &Pubkey, amount: u64) -> Instruction {
@@ -371,6 +453,8 @@ impl Env {
                 AccountMeta::new(*destination, false),
                 AccountMeta::new_readonly(spl_token_interface::id(), false),
                 AccountMeta::new_readonly(spl_token_2022_interface::id(), false),
+                AccountMeta::new_readonly(self.fees, false),
+                AccountMeta::new(self.treasury, false),
             ],
         )
     }

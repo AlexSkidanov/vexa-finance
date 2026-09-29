@@ -9,6 +9,7 @@
 //! | 3   | `Withdraw`                     | `amount: u64`                                          |
 //! | 4   | `SetPaused`                    | `paused: u8` (0 or 1)                                  |
 //! | 5   | `SetAdmin`                     | none                                                   |
+//! | 6   | `SetFees`                      | `fee_bps: u16`, `fee_cap: u64`, `vexa_mint: [u8; 32]`, `tier_count: u8`, tiers |
 //!
 //! Account lists are documented on each processor and mirrored by the
 //! builders in `@vexa/core` and the test harness.
@@ -24,6 +25,7 @@ pub enum VaultInstruction {
     Withdraw = 3,
     SetPaused = 4,
     SetAdmin = 5,
+    SetFees = 6,
 }
 
 impl TryFrom<u8> for VaultInstruction {
@@ -37,6 +39,7 @@ impl TryFrom<u8> for VaultInstruction {
             3 => Self::Withdraw,
             4 => Self::SetPaused,
             5 => Self::SetAdmin,
+            6 => Self::SetFees,
             _ => return Err(ProgramError::InvalidInstructionData),
         })
     }
