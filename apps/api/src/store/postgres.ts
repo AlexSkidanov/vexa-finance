@@ -1,6 +1,10 @@
 import postgres from 'postgres';
 import {
   HandleConflict,
+  type ActivityItem,
+  type EventRow,
+  type MovementRow,
+  type TransferRow,
   type ApiKeyRow,
   type HandleRecord,
   type IdempotencyBegin,
@@ -48,6 +52,32 @@ export function createPostgresStore(url: string): Store & { close(): Promise<voi
     revokedAt: r.revoked_at,
   });
 
+  const toTransfer = (r: postgres.Row): TransferRow => ({
+    id: r.id,
+    fromOwnerId: r.from_owner_id,
+    fromPubkey: r.from_pubkey,
+    toOwnerId: r.to_owner_id,
+    toHandle: r.to_handle,
+    toPubkey: r.to_pubkey,
+    ciphertext: r.ciphertext ?? {},
+    mode: r.mode,
+    status: r.status,
+    txSig: r.tx_sig,
+    signatures: r.signatures ?? [],
+    memoCiphertext: r.memo_ciphertext ? new Uint8Array(r.memo_ciphertext) : null,
+    failureReason: r.failure_reason,
+    createdAt: r.created_at,
+  });
+
+  const toMovement = (r: postgres.Row): MovementRow => ({
+    id: r.id,
+    ownerId: r.owner_id,
+    txSig: r.tx_sig,
+    status: r.status,
+    ...(r.destination ? { destination: r.destination } : {}),
+    createdAt: r.created_at,
+  });
+
   const toPasskey = (r: postgres.Row): PasskeyRow => ({
     id: r.id,
     userId: r.user_id,
@@ -63,6 +93,11 @@ export function createPostgresStore(url: string): Store & { close(): Promise<voi
     profiles: {
       async get(userId) {
         const [row] = await sql`select * from public.profiles where user_id = ${userId}`;
+        return row ? toProfile(row) : null;
+      },
+
+      async findByHandle(handle) {
+        const [row] = await sql`select * from public.profiles where handle = ${handle}`;
         return row ? toProfile(row) : null;
       },
 
@@ -204,6 +239,104 @@ export function createPostgresStore(url: string): Store & { close(): Promise<voi
           where id = ${id} and kind = ${kind} and expires_at > now()
           returning user_id, challenge`;
         return row ? { userId: row.user_id, challenge: row.challenge } : null;
+      },
+    },
+
+    money: {
+      async createTransfer(t) {
+        const [row] = await sql`
+          insert into public.transfers
+            (from_owner_id, from_pubkey, to_owner_id, to_handle, to_pubkey, ciphertext, mode, status)
+          values (${t.fromOwnerId}, ${t.fromPubkey}, ${t.toOwnerId}, ${t.toHandle}, ${t.toPubkey},
+                  '{}'::jsonb, ${t.mode}, 'pending')
+          returning *`;
+        return toTransfer(row!);
+      },
+      async getTransfer(id, ownerId) {
+        const [row] = await sql`
+          select * from public.transfers where id = ${id} and from_owner_id = ${ownerId}`;
+        return row ? toTransfer(row) : null;
+      },
+      async markTransferSubmitted(id) {
+        await sql`update public.transfers set status = 'submitted' where id = ${id} and status = 'pending'`;
+      },
+      async settleTransfer(id, t) {
+        const [row] = await sql`
+          update public.transfers
+          set status = 'settled', ciphertext = ${sql.json(t.ciphertext)}, tx_sig = ${t.txSig},
+              signatures = ${t.signatures},
+              memo_ciphertext = ${t.memoCiphertext ? Buffer.from(t.memoCiphertext) : null}
+          where id = ${id}
+          returning *`;
+        return toTransfer(row!);
+      },
+      async failTransfer(id, reason, signatures) {
+        await sql`
+          update public.transfers set status = 'failed', failure_reason = ${reason}, signatures = ${signatures}
+          where id = ${id}`;
+      },
+      async recordDeposit({ ownerId, txSig, status }) {
+        const [row] = await sql`
+          insert into public.deposits (owner_id, tx_sig, status) values (${ownerId}, ${txSig}, ${status})
+          returning *`;
+        return toMovement(row!);
+      },
+      async recordWithdrawal({ ownerId, destination, txSig, status }) {
+        const [row] = await sql`
+          insert into public.withdrawals (owner_id, destination, tx_sig, status)
+          values (${ownerId}, ${destination}, ${txSig}, ${status})
+          returning *`;
+        return toMovement(row!);
+      },
+      async activity(userId, { limit, before }) {
+        const cutoff = before ?? new Date('9999-01-01');
+        const [transfers, deposits, withdrawals] = await Promise.all([
+          sql`
+            select * from public.transfers
+            where (from_owner_id = ${userId} or to_owner_id = ${userId})
+              and status = 'settled' and created_at < ${cutoff}
+            order by created_at desc limit ${limit}`,
+          sql`
+            select * from public.deposits
+            where owner_id = ${userId} and created_at < ${cutoff}
+            order by created_at desc limit ${limit}`,
+          sql`
+            select * from public.withdrawals
+            where owner_id = ${userId} and created_at < ${cutoff}
+            order by created_at desc limit ${limit}`,
+        ]);
+        const items: ActivityItem[] = [
+          ...transfers.map((r) => {
+            const transfer = toTransfer(r);
+            return {
+              kind: 'transfer' as const,
+              direction:
+                transfer.fromOwnerId === userId ? ('sent' as const) : ('received' as const),
+              transfer,
+            };
+          }),
+          ...deposits.map((r) => ({ kind: 'deposit' as const, movement: toMovement(r) })),
+          ...withdrawals.map((r) => ({ kind: 'withdrawal' as const, movement: toMovement(r) })),
+        ];
+        const at = (i: ActivityItem) =>
+          i.kind === 'transfer' ? i.transfer.createdAt : i.movement.createdAt;
+        return items.sort((a, b) => at(b).getTime() - at(a).getTime()).slice(0, limit);
+      },
+    },
+
+    events: {
+      async emit(ownerId, type, data) {
+        const [row] = await sql`
+          insert into public.events (owner_id, type, data)
+          values (${ownerId}, ${type}, ${sql.json(data as postgres.JSONValue)})
+          returning *`;
+        return {
+          id: row!.id,
+          ownerId: row!.owner_id,
+          type: row!.type,
+          data: row!.data,
+          createdAt: row!.created_at,
+        } satisfies EventRow;
       },
     },
 

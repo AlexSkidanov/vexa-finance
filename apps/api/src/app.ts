@@ -12,6 +12,7 @@ import { auth } from './routes/auth.js';
 import { handles } from './routes/handles.js';
 import { health } from './routes/health.js';
 import { me } from './routes/me.js';
+import { money } from './routes/money.js';
 
 /**
  * Builds the Hono app from its dependencies. Kept separate from the server
@@ -47,6 +48,7 @@ export function createApp(deps: Deps) {
   app.route('/v1/me', me);
   app.route('/v1/handles', handles);
   app.route('/v1/api-keys', apiKeys);
+  app.route('/v1', money);
 
   app.onError(onError);
   app.notFound(onNotFound);

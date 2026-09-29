@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import {
   HandleConflict,
+  type ActivityItem,
+  type EventRow,
+  type MovementRow,
+  type TransferRow,
   type ApiKeyRow,
   type PasskeyRow,
   type ProfileRow,
@@ -28,6 +32,10 @@ export function createMemoryStore(): Store {
   >();
   const passkeys = new Map<string, PasskeyRow>();
   const challenges = new Map<string, { userId: string | null; kind: string; challenge: string }>();
+  const transfers = new Map<string, TransferRow>();
+  const deposits: MovementRow[] = [];
+  const withdrawals: MovementRow[] = [];
+  const events: EventRow[] = [];
 
   const profile = (userId: string): ProfileRow =>
     profiles.get(userId) ?? {
@@ -44,6 +52,9 @@ export function createMemoryStore(): Store {
     profiles: {
       async get(userId) {
         return profile(userId);
+      },
+      async findByHandle(handle) {
+        return [...profiles.values()].find((p) => p.handle === handle) ?? null;
       },
       async claimHandle({ userId, handle, solanaPubkey, elgamalPubkey }) {
         const current = profile(userId);
@@ -155,6 +166,99 @@ export function createMemoryStore(): Store {
         const c = challenges.get(id);
         challenges.delete(id);
         return c && c.kind === kind ? { userId: c.userId, challenge: c.challenge } : null;
+      },
+    },
+
+    money: {
+      async createTransfer(t) {
+        const row: TransferRow = {
+          id: randomUUID(),
+          ...t,
+          ciphertext: {},
+          status: 'pending',
+          txSig: null,
+          signatures: [],
+          memoCiphertext: null,
+          failureReason: null,
+          createdAt: new Date(),
+        };
+        transfers.set(row.id, row);
+        return row;
+      },
+      async getTransfer(id, ownerId) {
+        const t = transfers.get(id);
+        return t && t.fromOwnerId === ownerId ? t : null;
+      },
+      async markTransferSubmitted(id) {
+        const t = transfers.get(id);
+        if (t?.status === 'pending') t.status = 'submitted';
+      },
+      async settleTransfer(id, input) {
+        const t = transfers.get(id)!;
+        Object.assign(t, { status: 'settled', ...input });
+        return t;
+      },
+      async failTransfer(id, reason, signatures) {
+        const t = transfers.get(id);
+        if (t) Object.assign(t, { status: 'failed', failureReason: reason, signatures });
+      },
+      async recordDeposit({ ownerId, txSig, status }) {
+        const row: MovementRow = {
+          id: randomUUID(),
+          ownerId,
+          txSig,
+          status,
+          createdAt: new Date(),
+        };
+        deposits.push(row);
+        return row;
+      },
+      async recordWithdrawal({ ownerId, destination, txSig, status }) {
+        const row: MovementRow = {
+          id: randomUUID(),
+          ownerId,
+          txSig,
+          status,
+          destination,
+          createdAt: new Date(),
+        };
+        withdrawals.push(row);
+        return row;
+      },
+      async activity(userId, { limit, before }) {
+        const cutoff = before?.getTime() ?? Infinity;
+        const items: ActivityItem[] = [
+          ...[...transfers.values()]
+            .filter(
+              (t) => t.status === 'settled' && (t.fromOwnerId === userId || t.toOwnerId === userId),
+            )
+            .map((transfer) => ({
+              kind: 'transfer' as const,
+              direction:
+                transfer.fromOwnerId === userId ? ('sent' as const) : ('received' as const),
+              transfer,
+            })),
+          ...deposits
+            .filter((d) => d.ownerId === userId)
+            .map((movement) => ({ kind: 'deposit' as const, movement })),
+          ...withdrawals
+            .filter((w) => w.ownerId === userId)
+            .map((movement) => ({ kind: 'withdrawal' as const, movement })),
+        ];
+        const at = (i: ActivityItem) =>
+          i.kind === 'transfer' ? i.transfer.createdAt : i.movement.createdAt;
+        return items
+          .filter((i) => at(i).getTime() < cutoff)
+          .sort((a, b) => at(b).getTime() - at(a).getTime())
+          .slice(0, limit);
+      },
+    },
+
+    events: {
+      async emit(ownerId, type, data) {
+        const row: EventRow = { id: randomUUID(), ownerId, type, data, createdAt: new Date() };
+        events.push(row);
+        return row;
       },
     },
 

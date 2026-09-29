@@ -33,6 +33,12 @@ const EnvSchema = z.object({
   SUPABASE_JWT_SECRET: z.string().optional(),
 
   SOLANA_CLUSTER: z.enum(['devnet', 'mainnet-beta']),
+  ALCHEMY_SOLANA_RPC_URL: z.url(),
+  /** Base58 64-byte secret key, or a solana-keygen JSON array. Pays fees and sponsored rent. */
+  SOLANA_FEE_PAYER_KEYPAIR: z.string().min(64),
+  VAULT_PROGRAM_ID: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/),
+  USDC_MINT: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/),
+  CUSDC_MINT: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/),
 });
 
 export type Env = z.infer<typeof EnvSchema> & {

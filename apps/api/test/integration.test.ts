@@ -19,7 +19,7 @@ import { HandleConflict } from '../src/store/types.js';
 import { createLogger } from '../src/logger.js';
 import { loadEnv } from '../src/env.js';
 import { createApp } from '../src/app.js';
-import { fakeDevice, signedClaim } from './helpers.js';
+import { fakeDevice, offlineChain, signedClaim, TEST_VAULT } from './helpers.js';
 
 config({ path: new URL('../../../.env', import.meta.url).pathname, quiet: true });
 const enabled = process.env.VEXA_INTEGRATION === '1';
@@ -153,6 +153,8 @@ describe.skipIf(!enabled)('integration: Supabase + Postgres', () => {
       store,
       auth,
       tokens: createSupabaseTokenVerifier({ supabaseUrl: env.SUPABASE_URL }),
+      chain: offlineChain,
+      vault: TEST_VAULT,
       version: 'it',
     });
     const session = await auth.sessionForUser(id);

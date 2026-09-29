@@ -56,9 +56,54 @@ export class HandleConflict extends Error {
   }
 }
 
+export type TransferStatus = 'pending' | 'submitted' | 'settled' | 'failed';
+
+/** Transfer amounts exist only inside `ciphertext`. */
+export interface TransferRow {
+  id: string;
+  fromOwnerId: string | null;
+  fromPubkey: string;
+  toOwnerId: string | null;
+  toHandle: string | null;
+  /** The recipient's cUSDC token account. */
+  toPubkey: string;
+  /** { groupedLo, groupedHi }: base64 grouped ElGamal ciphertexts (sender, recipient, auditor). */
+  ciphertext: Record<string, string>;
+  mode: 'standard' | 'stealth';
+  status: TransferStatus;
+  txSig: string | null;
+  signatures: string[];
+  memoCiphertext: Uint8Array | null;
+  failureReason: string | null;
+  createdAt: Date;
+}
+
+export interface MovementRow {
+  id: string;
+  ownerId: string;
+  txSig: string | null;
+  status: 'submitted' | 'confirmed' | 'failed';
+  destination?: string;
+  createdAt: Date;
+}
+
+export type ActivityItem =
+  | { kind: 'transfer'; direction: 'sent' | 'received'; transfer: TransferRow }
+  | { kind: 'deposit'; movement: MovementRow }
+  | { kind: 'withdrawal'; movement: MovementRow };
+
+export interface EventRow {
+  id: string;
+  ownerId: string;
+  type: string;
+  data: Record<string, unknown>;
+  createdAt: Date;
+}
+
 export interface Store {
   profiles: {
     get(userId: string): Promise<ProfileRow | null>;
+    findByHandle(handle: string): Promise<ProfileRow | null>;
     /** Atomically registers the handle and binds both keys. Throws HandleConflict. */
     claimHandle(input: {
       userId: string;
@@ -115,6 +160,47 @@ export interface Store {
       id: string,
       kind: 'registration' | 'authentication',
     ): Promise<{ userId: string | null; challenge: string } | null>;
+  };
+
+  money: {
+    createTransfer(input: {
+      fromOwnerId: string;
+      fromPubkey: string;
+      toOwnerId: string | null;
+      toHandle: string | null;
+      toPubkey: string;
+      mode: 'standard' | 'stealth';
+    }): Promise<TransferRow>;
+    /** Only returns the transfer if `ownerId` sent it. */
+    getTransfer(id: string, ownerId: string): Promise<TransferRow | null>;
+    markTransferSubmitted(id: string): Promise<void>;
+    settleTransfer(
+      id: string,
+      input: {
+        ciphertext: Record<string, string>;
+        txSig: string;
+        signatures: string[];
+        memoCiphertext: Uint8Array | null;
+      },
+    ): Promise<TransferRow>;
+    failTransfer(id: string, reason: string, signatures: string[]): Promise<void>;
+    recordDeposit(input: {
+      ownerId: string;
+      txSig: string | null;
+      status: MovementRow['status'];
+    }): Promise<MovementRow>;
+    recordWithdrawal(input: {
+      ownerId: string;
+      destination: string;
+      txSig: string | null;
+      status: MovementRow['status'];
+    }): Promise<MovementRow>;
+    /** Newest first; transfers the user sent or received, plus their deposits and withdrawals. */
+    activity(userId: string, opts: { limit: number; before?: Date }): Promise<ActivityItem[]>;
+  };
+
+  events: {
+    emit(ownerId: string, type: string, data: Record<string, unknown>): Promise<EventRow>;
   };
 
   ping(): Promise<void>;

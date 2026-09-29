@@ -1,4 +1,6 @@
+import type { Address } from '@solana/kit';
 import type { Env } from './env.js';
+import type { Chain } from './chain/chain.js';
 import type { Logger } from './logger.js';
 import type { AuthProvider } from './lib/auth-provider.js';
 import type { TokenVerifier } from './lib/tokens.js';
@@ -20,7 +22,17 @@ export interface Deps {
   store: Store;
   auth: AuthProvider;
   tokens: TokenVerifier;
+  chain: Chain;
+  vault: VaultAddresses;
   version: string;
+}
+
+export interface VaultAddresses {
+  program: Address;
+  config: Address;
+  usdcMint: Address;
+  cusdcMint: Address;
+  usdcReserve: Address;
 }
 
 export type AppBindings = {
