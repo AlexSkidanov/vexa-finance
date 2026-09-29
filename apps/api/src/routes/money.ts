@@ -383,6 +383,7 @@ export const money = new Hono<AppBindings>()
       solanaPubkey: string;
       elgamalPubkey: string;
       ownerId: string | null;
+      agentId?: string;
     };
     if (body.to.startsWith('agent:')) {
       const agent = await store.agents.get(userId, body.to.slice('agent:'.length));
@@ -392,6 +393,7 @@ export const money = new Hono<AppBindings>()
         solanaPubkey: agent.solanaPubkey,
         elgamalPubkey: agent.elgamalPubkey,
         ownerId: userId,
+        agentId: agent.id,
       };
     } else {
       const parsed = validateHandle(body.to);
@@ -418,6 +420,7 @@ export const money = new Hono<AppBindings>()
     const transfer = await store.money.createTransfer({
       fromOwnerId: me.userId,
       fromAgentId: payer.agentId,
+      toAgentId: recipient.agentId ?? null,
       fromPubkey: payer.cusdc,
       toOwnerId: recipient.ownerId,
       toHandle: recipient.handle,
@@ -469,7 +472,11 @@ export const money = new Hono<AppBindings>()
 
     // Bind the ciphertexts we'll store to the real parties before sending.
     const proof = validityContext(checked);
-    const recipient = transfer.toHandle ? await store.handles.resolve(transfer.toHandle) : null;
+    const recipient = transfer.toHandle
+      ? await store.handles.resolve(transfer.toHandle)
+      : transfer.toAgentId
+        ? await store.agents.get(me.userId, transfer.toAgentId)
+        : null;
     const mint = await chain.getAccountData(vault.cusdcMint);
     const auditor =
       (mint && decodeConfidentialMint(mint)?.auditorElgamalPubkey) ?? new Uint8Array(32);

@@ -25,6 +25,8 @@ import {
 import { request, VexaError, type HttpOptions, type RequestOptions } from './http.js';
 import { createPasskey, getPasskeyAssertion } from './passkeys.js';
 import { Money } from './money.js';
+import { Agents } from './agents.js';
+import { DEFAULT_BASE_URLS } from './base-urls.js';
 
 export { VexaError };
 /** Verify webhook deliveries locally: `verifyWebhookSignature({ payload, header, secret })`. */
@@ -37,12 +39,19 @@ export {
   type WebhookVerification,
 } from '@vexa/core';
 export type { ActivityMovement, ActivityTransfer, Balance, FeeQuote, TierInfo } from './money.js';
+export type { AgentPolicyInput, AgentState, AgentSummary, AgentsConfig } from './agents.js';
+export {
+  parseX402Payment,
+  VexaAgent,
+  X402_NETWORK,
+  X402_SCHEME,
+  type PaymentRequirements,
+  type PaymentResult,
+  type VexaAgentOptions,
+} from './agent.js';
 export type { ApiKeySummary, CreatedApiKey, HandleResolution, Profile, Session };
 
-export const DEFAULT_BASE_URLS: Record<ApiEnvironment, string> = {
-  live: 'https://api.vexa.finance',
-  test: 'https://sandbox.api.vexa.finance',
-};
+export { DEFAULT_BASE_URLS } from './base-urls.js';
 
 export interface VexaOptions {
   /** A `vx_live_…` or `vx_test_…` key. Picks the environment and base URL. */
@@ -231,6 +240,9 @@ export class Vexa {
 
   /** Deposits, confidential transfers, withdrawals, balances and activity. */
   readonly money: Money = new Money((method, path, opts) => this.call(method, path, opts));
+
+  /** Your agents: create, limit, fund, pause, revoke, sweep. */
+  readonly agents: Agents = new Agents((method, path, opts) => this.call(method, path, opts));
 
   me(): Promise<Profile> {
     return this.call<Profile>('GET', '/v1/me');

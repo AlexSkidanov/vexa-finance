@@ -207,6 +207,7 @@ export function createMemoryStore(): Store {
           id: randomUUID(),
           ...t,
           fromAgentId: t.fromAgentId ?? null,
+          toAgentId: t.toAgentId ?? null,
           ciphertext: {},
           status: 'pending',
           txSig: null,

@@ -64,6 +64,8 @@ export interface TransferRow {
   fromOwnerId: string | null;
   /** Set when an agent of `fromOwnerId` made the payment. */
   fromAgentId: string | null;
+  /** Set when the recipient is an agent (its owner funding it). */
+  toAgentId: string | null;
   fromPubkey: string;
   toOwnerId: string | null;
   toHandle: string | null;
@@ -241,6 +243,7 @@ export interface Store {
       toPubkey: string;
       mode: 'standard' | 'stealth';
       fromAgentId?: string | null;
+      toAgentId?: string | null;
     }): Promise<TransferRow>;
     /** Only returns the transfer if `ownerId` sent it. */
     getTransfer(id: string, ownerId: string): Promise<TransferRow | null>;

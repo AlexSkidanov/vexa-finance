@@ -27,41 +27,10 @@ import {
   type Testbed,
   type Wallet,
 } from '../../../packages/core/test/support/testbed.js';
-import { ChainError, type Chain } from '../src/chain/chain.js';
+import { litesvmChain } from './support/litesvm.js';
 import { sessionToken, testApp } from './helpers.js';
 
 const USDC = 1_000_000n;
-
-function litesvmChain(bed: Testbed): Chain {
-  return {
-    feePayer: bed.feePayer.address,
-    feePayerSigner: bed.feePayer,
-    async getAccountData(a) {
-      return bed.account(a);
-    },
-    async getRentTable() {
-      return bed.rent;
-    },
-    async getMinimumBalance(space) {
-      return bed.svm.minimumBalanceForRentExemption(space);
-    },
-    async getLatestBlockhash() {
-      bed.svm.expireBlockhash();
-      return bed.blockhash() as never;
-    },
-    async signAndSend(tx) {
-      try {
-        return await bed.sendAsFeePayer(tx);
-      } catch (e) {
-        throw new ChainError((e as Error).message, (e as { logs?: string[] }).logs ?? []);
-      }
-    },
-    async sendAsFeePayer(instructions) {
-      await bed.sendDirect(bed.feePayer, instructions);
-      return '';
-    },
-  };
-}
 
 // Proof generation is CPU-bound; shared CI runners need more than the 5 s default.
 describe.skipIf(!vaultBinaryExists())('money over HTTP, on LiteSVM', { timeout: 30_000 }, () => {

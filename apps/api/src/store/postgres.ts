@@ -60,6 +60,7 @@ export function createPostgresStore(url: string): Store & { close(): Promise<voi
     id: r.id,
     fromOwnerId: r.from_owner_id,
     fromAgentId: r.from_agent_id,
+    toAgentId: r.to_agent_id,
     fromPubkey: r.from_pubkey,
     toOwnerId: r.to_owner_id,
     toHandle: r.to_handle,
@@ -304,10 +305,11 @@ export function createPostgresStore(url: string): Store & { close(): Promise<voi
       async createTransfer(t) {
         const [row] = await sql`
           insert into public.transfers
-            (from_owner_id, from_agent_id, from_pubkey, to_owner_id, to_handle, to_pubkey,
-             ciphertext, mode, status)
+            (from_owner_id, from_agent_id, from_pubkey, to_owner_id, to_agent_id, to_handle,
+             to_pubkey, ciphertext, mode, status)
           values (${t.fromOwnerId}, ${t.fromAgentId ?? null}, ${t.fromPubkey}, ${t.toOwnerId},
-                  ${t.toHandle}, ${t.toPubkey}, '{}'::jsonb, ${t.mode}, 'pending')
+                  ${t.toAgentId ?? null}, ${t.toHandle}, ${t.toPubkey}, '{}'::jsonb, ${t.mode},
+                  'pending')
           returning *`;
         return toTransfer(row!);
       },
