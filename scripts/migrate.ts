@@ -101,14 +101,14 @@ async function reportInvariants(db: postgres.Sql | postgres.TransactionSql) {
                   where table_schema = 'public' and table_name = t.tbl)`;
   const amountColumns = await db<{ column_name: string }[]>`
     select column_name from information_schema.columns
-    where table_schema = 'public' and table_name = 'transfers'
+    where table_schema = 'public' and table_name in ('transfers', 'deposits', 'withdrawals', 'events')
       and data_type in ('numeric', 'bigint', 'integer', 'real', 'double precision')`;
 
   console.log(`\npublic tables: ${tables.map((t) => t.relname).join(', ')}`);
   const problems = [
     ...tables.filter((t) => !t.rls).map((t) => `RLS disabled on ${t.relname}`),
     ...secretColumns.filter((c) => c.readable).map((c) => `authenticated can read ${c.col}`),
-    ...amountColumns.map((c) => `transfers has a numeric column "${c.column_name}"`),
+    ...amountColumns.map((c) => `a money table has a numeric column "${c.column_name}"`),
   ];
   if (problems.length) {
     console.error(`\nInvariant violations:\n  - ${problems.join('\n  - ')}`);
