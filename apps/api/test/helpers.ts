@@ -100,6 +100,7 @@ export function testApp(overrides: Partial<Deps> = {}) {
     tokens: fakeTokens,
     chain: offlineChain,
     vault: TEST_VAULT,
+    policy: null,
     version: 'test',
     ...overrides,
   };

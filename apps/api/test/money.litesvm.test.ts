@@ -35,11 +35,15 @@ const USDC = 1_000_000n;
 function litesvmChain(bed: Testbed): Chain {
   return {
     feePayer: bed.feePayer.address,
+    feePayerSigner: bed.feePayer,
     async getAccountData(a) {
       return bed.account(a);
     },
     async getRentTable() {
       return bed.rent;
+    },
+    async getMinimumBalance(space) {
+      return bed.svm.minimumBalanceForRentExemption(space);
     },
     async getLatestBlockhash() {
       bed.svm.expireBlockhash();

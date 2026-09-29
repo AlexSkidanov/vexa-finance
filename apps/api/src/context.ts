@@ -5,6 +5,7 @@ import type { Logger } from './logger.js';
 import type { AuthProvider } from './lib/auth-provider.js';
 import type { TokenVerifier } from './lib/tokens.js';
 import type { Store } from './store/types.js';
+import type { PolicyContract } from './agents/policy.js';
 
 /** Who is making the request, once authenticated. */
 export interface Principal {
@@ -24,6 +25,8 @@ export interface Deps {
   tokens: TokenVerifier;
   chain: Chain;
   vault: VaultAddresses;
+  /** The NEAR policy contract, or null where agents aren't set up. */
+  policy: PolicyContract | null;
   version: string;
 }
 

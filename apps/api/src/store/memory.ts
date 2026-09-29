@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import {
   HandleConflict,
   type ActivityItem,
+  type AgentRow,
+  type AgentTraceRow,
   type EventRow,
   type MovementRow,
   type DueDelivery,
@@ -35,6 +37,9 @@ export function createMemoryStore(): Store {
   const passkeys = new Map<string, PasskeyRow>();
   const challenges = new Map<string, { userId: string | null; kind: string; challenge: string }>();
   const transfers = new Map<string, TransferRow>();
+  const agents = new Map<string, AgentRow>();
+  const agentPayments: { transferId: string; agentId: string; index: number }[] = [];
+  const traces: AgentTraceRow[] = [];
   const deposits: MovementRow[] = [];
   const withdrawals: MovementRow[] = [];
   const events: EventRow[] = [];
@@ -201,6 +206,7 @@ export function createMemoryStore(): Store {
         const row: TransferRow = {
           id: randomUUID(),
           ...t,
+          fromAgentId: t.fromAgentId ?? null,
           ciphertext: {},
           status: 'pending',
           txSig: null,
@@ -228,6 +234,16 @@ export function createMemoryStore(): Store {
       async failTransfer(id, reason, signatures) {
         const t = transfers.get(id);
         if (t) Object.assign(t, { status: 'failed', failureReason: reason, signatures });
+      },
+      async recordAgentPayment(p) {
+        agentPayments.push(p);
+      },
+      async agentPayments(agentId, fromIndex) {
+        return agentPayments
+          .filter((p) => p.agentId === agentId && p.index >= fromIndex)
+          .map((p) => ({ index: p.index, transfer: transfers.get(p.transferId)! }))
+          .filter((p) => p.transfer.status === 'settled')
+          .sort((a, b) => a.index - b.index);
       },
       async recordDeposit({ ownerId, txSig, status }) {
         const row: MovementRow = {
@@ -280,6 +296,57 @@ export function createMemoryStore(): Store {
         return items
           .filter((i) => at(i).getTime() < cutoff)
           .sort((a, b) => at(b).getTime() - at(a).getTime())
+          .slice(0, limit);
+      },
+    },
+
+    agents: {
+      async create(a) {
+        const row: AgentRow = {
+          ...a,
+          status: 'active',
+          policy: { ...a.policy, version: 1 },
+          createdAt: new Date(),
+        };
+        agents.set(row.id, row);
+        return row;
+      },
+      async get(ownerId, id) {
+        const a = agents.get(id);
+        return a && a.ownerId === ownerId ? a : null;
+      },
+      async list(ownerId) {
+        return [...agents.values()].filter((a) => a.ownerId === ownerId);
+      },
+      async countLive(ownerId) {
+        return [...agents.values()].filter((a) => a.ownerId === ownerId && a.status !== 'revoked')
+          .length;
+      },
+      async setPolicy(agentId, policy) {
+        const a = agents.get(agentId)!;
+        a.policy = { ...policy, version: a.policy.version + 1 };
+        return a.policy;
+      },
+      async setStatus(agentId, status) {
+        const a = agents.get(agentId);
+        if (a) a.status = status;
+      },
+      async trace(t) {
+        const row: AgentTraceRow = {
+          id: randomUUID(),
+          agentId: t.agentId,
+          requestId: t.requestId,
+          step: t.step,
+          detail: t.detail,
+          createdAt: new Date(),
+        };
+        traces.push(row);
+        return row;
+      },
+      async traces(agentId, { limit, requestId }) {
+        return traces
+          .filter((t) => t.agentId === agentId && (!requestId || t.requestId === requestId))
+          .reverse()
           .slice(0, limit);
       },
     },

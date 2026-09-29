@@ -1,3 +1,5 @@
+import { createPolicyContract } from './agents/policy.js';
+import { createNearClient } from './near/client.js';
 import { serve } from '@hono/node-server';
 import { createApp } from './app.js';
 import { loadEnv } from './env.js';
@@ -37,12 +39,27 @@ const chain = await createRpcChain({
   feePayerKeypair: env.SOLANA_FEE_PAYER_KEYPAIR,
 });
 
+const policy =
+  env.NEAR_POLICY_CONTRACT_ID && env.NEAR_DEPLOYER_ACCOUNT_ID && env.NEAR_DEPLOYER_PRIVATE_KEY
+    ? createPolicyContract({
+        near: createNearClient({
+          rpcUrl: env.NEAR_RPC_URL,
+          accountId: env.NEAR_DEPLOYER_ACCOUNT_ID,
+          privateKey: env.NEAR_DEPLOYER_PRIVATE_KEY,
+        }),
+        contractId: env.NEAR_POLICY_CONTRACT_ID,
+        mpcContract: env.NEAR_MPC_CONTRACT_ID,
+      })
+    : null;
+if (!policy) logger.warn('NEAR policy contract not configured: agents are disabled');
+
 const app = createApp({
   env,
   logger,
   store,
   chain,
   vault,
+  policy,
   version:
     process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 7) ?? process.env.npm_package_version ?? 'dev',
   auth: createSupabaseAuthProvider({

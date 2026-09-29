@@ -43,6 +43,14 @@ const EnvSchema = z.object({
   ALCHEMY_WEBHOOK_SIGNING_KEY: z.string().optional(),
   ALCHEMY_WEBHOOK_ID: z.string().optional(),
   ALCHEMY_NOTIFY_AUTH_TOKEN: z.string().optional(),
+
+  // Agents. Without a policy contract the /v1/agents routes are disabled.
+  NEAR_RPC_URL: z.url().default('https://rpc.mainnet.near.org'),
+  NEAR_DEPLOYER_ACCOUNT_ID: z.string().optional(),
+  /** ed25519:<base58>: the relayer that pays for policy calls. */
+  NEAR_DEPLOYER_PRIVATE_KEY: z.string().optional(),
+  NEAR_POLICY_CONTRACT_ID: z.string().optional(),
+  NEAR_MPC_CONTRACT_ID: z.string().default('v1.signer'),
 });
 
 export type Env = z.infer<typeof EnvSchema> & {

@@ -1,3 +1,4 @@
+import { agents } from './routes/agents.js';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
@@ -52,6 +53,7 @@ export function createApp(deps: Deps) {
   app.route('/v1/api-keys', apiKeys);
   app.route('/v1/webhooks', webhooks);
   app.route('/v1/hooks', hooks);
+  app.route('/v1/agents', agents);
   app.route('/v1', money);
 
   app.onError(onError);

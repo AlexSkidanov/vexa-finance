@@ -2,6 +2,9 @@ import postgres from 'postgres';
 import {
   HandleConflict,
   type ActivityItem,
+  type AgentRow,
+  type AgentTraceRow,
+  type PolicyRow,
   type EventRow,
   type MovementRow,
   type TransferRow,
@@ -56,6 +59,7 @@ export function createPostgresStore(url: string): Store & { close(): Promise<voi
   const toTransfer = (r: postgres.Row): TransferRow => ({
     id: r.id,
     fromOwnerId: r.from_owner_id,
+    fromAgentId: r.from_agent_id,
     fromPubkey: r.from_pubkey,
     toOwnerId: r.to_owner_id,
     toHandle: r.to_handle,
@@ -67,6 +71,45 @@ export function createPostgresStore(url: string): Store & { close(): Promise<voi
     signatures: r.signatures ?? [],
     memoCiphertext: r.memo_ciphertext ? new Uint8Array(r.memo_ciphertext) : null,
     failureReason: r.failure_reason,
+    createdAt: r.created_at,
+  });
+
+  const toPolicy = (r: postgres.Row): PolicyRow => ({
+    version: r.version,
+    maxPerRequest: BigInt(r.max_per_request),
+    dailyLimit: BigInt(r.daily_limit),
+    allowedRecipients: r.allowed_recipients ?? [],
+    allowedDomains: r.allowed_domains ?? [],
+  });
+
+  // An agent with its latest policy version.
+  const agentSelect = sql`
+    select a.*, p.version, p.max_per_request, p.daily_limit, p.allowed_recipients, p.allowed_domains
+    from public.agents a
+    join lateral (
+      select * from public.policies where agent_id = a.id order by version desc limit 1
+    ) p on true`;
+
+  const toAgent = (r: postgres.Row): AgentRow => ({
+    id: r.id,
+    ownerId: r.owner_id,
+    name: r.name,
+    solanaPubkey: r.solana_pubkey,
+    cusdcAccount: r.cusdc_account,
+    nonceAccount: r.nonce_account,
+    authority: r.authority,
+    elgamalPubkey: r.elgamal_pubkey,
+    status: r.status,
+    policy: toPolicy(r),
+    createdAt: r.created_at,
+  });
+
+  const toTrace = (r: postgres.Row): AgentTraceRow => ({
+    id: r.id,
+    agentId: r.agent_id,
+    requestId: r.request_id,
+    step: r.step,
+    detail: r.detail ?? {},
     createdAt: r.created_at,
   });
 
@@ -261,9 +304,10 @@ export function createPostgresStore(url: string): Store & { close(): Promise<voi
       async createTransfer(t) {
         const [row] = await sql`
           insert into public.transfers
-            (from_owner_id, from_pubkey, to_owner_id, to_handle, to_pubkey, ciphertext, mode, status)
-          values (${t.fromOwnerId}, ${t.fromPubkey}, ${t.toOwnerId}, ${t.toHandle}, ${t.toPubkey},
-                  '{}'::jsonb, ${t.mode}, 'pending')
+            (from_owner_id, from_agent_id, from_pubkey, to_owner_id, to_handle, to_pubkey,
+             ciphertext, mode, status)
+          values (${t.fromOwnerId}, ${t.fromAgentId ?? null}, ${t.fromPubkey}, ${t.toOwnerId},
+                  ${t.toHandle}, ${t.toPubkey}, '{}'::jsonb, ${t.mode}, 'pending')
           returning *`;
         return toTransfer(row!);
       },
@@ -289,6 +333,19 @@ export function createPostgresStore(url: string): Store & { close(): Promise<voi
         await sql`
           update public.transfers set status = 'failed', failure_reason = ${reason}, signatures = ${signatures}
           where id = ${id}`;
+      },
+      async recordAgentPayment(p) {
+        await sql`
+          insert into public.agent_payments (transfer_id, agent_id, payment_index)
+          values (${p.transferId}, ${p.agentId}, ${p.index})`;
+      },
+      async agentPayments(agentId, fromIndex) {
+        const rows = await sql`
+          select p.payment_index, t.* from public.agent_payments p
+          join public.transfers t on t.id = p.transfer_id
+          where p.agent_id = ${agentId} and p.payment_index >= ${fromIndex} and t.status = 'settled'
+          order by p.payment_index`;
+        return rows.map((r) => ({ index: r.payment_index as number, transfer: toTransfer(r) }));
       },
       async recordDeposit({ ownerId, txSig, status }) {
         const [row] = await sql`
@@ -340,6 +397,67 @@ export function createPostgresStore(url: string): Store & { close(): Promise<voi
         const at = (i: ActivityItem) =>
           i.kind === 'transfer' ? i.transfer.createdAt : i.movement.createdAt;
         return items.sort((a, b) => at(b).getTime() - at(a).getTime()).slice(0, limit);
+      },
+    },
+
+    agents: {
+      async create(a) {
+        return sql.begin(async (tx) => {
+          await tx`
+            insert into public.agents
+              (id, owner_id, name, near_policy_id, solana_pubkey, cusdc_account, nonce_account,
+               authority, elgamal_pubkey)
+            values (${a.id}, ${a.ownerId}, ${a.name}, ${a.id}, ${a.solanaPubkey}, ${a.cusdcAccount},
+                    ${a.nonceAccount}, ${a.authority}, ${a.elgamalPubkey})`;
+          await tx`
+            insert into public.policies
+              (agent_id, version, max_per_request, daily_limit, allowed_recipients, allowed_domains)
+            values (${a.id}, 1, ${a.policy.maxPerRequest.toString()}, ${a.policy.dailyLimit.toString()},
+                    ${a.policy.allowedRecipients}, ${a.policy.allowedDomains})`;
+          const [row] = await tx`${agentSelect} where a.id = ${a.id}`;
+          return toAgent(row!);
+        });
+      },
+      async get(ownerId, id) {
+        const [row] = await sql`${agentSelect} where a.id = ${id} and a.owner_id = ${ownerId}`;
+        return row ? toAgent(row) : null;
+      },
+      async list(ownerId) {
+        const rows = await sql`${agentSelect} where a.owner_id = ${ownerId} order by a.created_at`;
+        return rows.map(toAgent);
+      },
+      async countLive(ownerId) {
+        const [row] = await sql`
+          select count(*)::int as n from public.agents
+          where owner_id = ${ownerId} and status <> 'revoked'`;
+        return row!.n as number;
+      },
+      async setPolicy(agentId, p) {
+        const [row] = await sql`
+          insert into public.policies
+            (agent_id, version, max_per_request, daily_limit, allowed_recipients, allowed_domains)
+          select ${agentId}, coalesce(max(version), 0) + 1, ${p.maxPerRequest.toString()},
+                 ${p.dailyLimit.toString()}, ${p.allowedRecipients}, ${p.allowedDomains}
+          from public.policies where agent_id = ${agentId}
+          returning *`;
+        return toPolicy(row!);
+      },
+      async setStatus(agentId, status) {
+        await sql`update public.agents set status = ${status} where id = ${agentId}`;
+      },
+      async trace(t) {
+        const [row] = await sql`
+          insert into public.agent_traces (agent_id, owner_id, request_id, step, detail)
+          values (${t.agentId}, ${t.ownerId}, ${t.requestId}, ${t.step}, ${sql.json(t.detail as never)})
+          returning *`;
+        return toTrace(row!);
+      },
+      async traces(agentId, { limit, requestId }) {
+        const rows = await sql`
+          select * from public.agent_traces
+          where agent_id = ${agentId} ${requestId ? sql`and request_id = ${requestId}` : sql``}
+          order by created_at desc limit ${limit}`;
+        return rows.map(toTrace);
       },
     },
 

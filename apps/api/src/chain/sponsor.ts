@@ -71,6 +71,28 @@ export interface SponsorContext {
   sponsorAccountRent?: boolean;
   /** stake/unstake: the owner's stake record PDA. */
   stakeRecord?: Address;
+  /** Agent plans: the agent's durable nonce account. */
+  nonceAccount?: Address;
+}
+
+/**
+ * Agent plans are the user plans with the agent's MPC address as the owner
+ * (the route sets `owner` and `ownerCusdc` to the agent's), plus a durable
+ * nonce advance and, for payments, the vault's RequireContexts. They're
+ * checked as the plan they extend.
+ */
+function baseKind(kind: PlanKind): PlanKind {
+  switch (kind) {
+    case 'agent-configure':
+      return 'configure';
+    case 'agent-apply-pending':
+      return 'apply-pending';
+    case 'agent-payment':
+    case 'agent-sweep':
+      return 'transfer';
+    default:
+      return kind;
+  }
 }
 
 export interface DecodedInstruction {
@@ -126,6 +148,8 @@ const VAULT_DEPOSIT = 2;
 const VAULT_WITHDRAW = 3;
 const VAULT_STAKE = 7;
 const VAULT_UNSTAKE = 8;
+const VAULT_REQUIRE_CONTEXTS = 9;
+const SYSTEM_ADVANCE_NONCE = 4;
 
 const u32 = (d: Uint8Array, o: number) =>
   new DataView(d.buffer, d.byteOffset + o, 4).getUint32(0, true);
@@ -224,12 +248,30 @@ export function checkPlan(
 /** Returns lamports permanently given away by this instruction (sponsored rent). */
 function checkInstruction(
   ix: DecodedInstruction,
-  ctx: SponsorContext,
+  planCtx: SponsorContext,
   label: StepLabel,
   created: Set<Address>,
   closed: Set<Address>,
 ): bigint {
-  const usesFeePayer = ix.accounts.includes(ctx.feePayer);
+  const usesFeePayer = ix.accounts.includes(planCtx.feePayer);
+  const agentTransfer =
+    (planCtx.kind === 'agent-payment' || planCtx.kind === 'agent-sweep') &&
+    label === 'agent-transfer';
+  const ctx = { ...planCtx, kind: baseKind(planCtx.kind) };
+
+  if (ix.program === SYSTEM_PROGRAM && agentTransfer && ix.data[0] === SYSTEM_ADVANCE_NONCE) {
+    // accounts: nonce, recent blockhashes sysvar, nonce authority (the agent)
+    if (ix.accounts[0] !== planCtx.nonceAccount || ix.accounts[2] !== planCtx.owner || usesFeePayer)
+      throw new SponsorshipRefused('agent payments advance the agent’s own durable nonce');
+    return 0n;
+  }
+  if (ix.program === VAULT_PROGRAM && ix.data[0] === VAULT_REQUIRE_CONTEXTS) {
+    if (planCtx.kind !== 'agent-payment' || !agentTransfer)
+      throw new SponsorshipRefused('RequireContexts belongs in an agent payment');
+    if (ix.accounts.some((a) => !created.has(a)))
+      throw new SponsorshipRefused('RequireContexts must name this plan’s proof contexts');
+    return 0n;
+  }
 
   switch (ix.program) {
     case SYSTEM_PROGRAM: {

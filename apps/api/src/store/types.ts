@@ -62,6 +62,8 @@ export type TransferStatus = 'pending' | 'submitted' | 'settled' | 'failed';
 export interface TransferRow {
   id: string;
   fromOwnerId: string | null;
+  /** Set when an agent of `fromOwnerId` made the payment. */
+  fromAgentId: string | null;
   fromPubkey: string;
   toOwnerId: string | null;
   toHandle: string | null;
@@ -91,6 +93,52 @@ export type ActivityItem =
   | { kind: 'transfer'; direction: 'sent' | 'received'; transfer: TransferRow }
   | { kind: 'deposit'; movement: MovementRow }
   | { kind: 'withdrawal'; movement: MovementRow };
+
+export type AgentStatus = 'active' | 'paused' | 'revoked';
+
+/** Limits are configuration, public on NEAR anyway: not balances. */
+export interface PolicyRow {
+  version: number;
+  /** USDC base units. */
+  maxPerRequest: bigint;
+  dailyLimit: bigint;
+  allowedRecipients: string[];
+  allowedDomains: string[];
+}
+
+export interface AgentRow {
+  id: string;
+  ownerId: string;
+  name: string | null;
+  /** The agent's MPC-derived Solana address. */
+  solanaPubkey: string;
+  cusdcAccount: string;
+  nonceAccount: string;
+  authority: string;
+  elgamalPubkey: string;
+  status: AgentStatus;
+  policy: PolicyRow;
+  createdAt: Date;
+}
+
+export type TraceStep =
+  | 'request'
+  | 'payment_required'
+  | 'quote'
+  | 'policy_check'
+  | 'paid'
+  | 'retried'
+  | 'completed'
+  | 'failed';
+
+export interface AgentTraceRow {
+  id: string;
+  agentId: string;
+  requestId: string | null;
+  step: TraceStep;
+  detail: Record<string, unknown>;
+  createdAt: Date;
+}
 
 export interface EventRow {
   id: string;
@@ -192,6 +240,7 @@ export interface Store {
       toHandle: string | null;
       toPubkey: string;
       mode: 'standard' | 'stealth';
+      fromAgentId?: string | null;
     }): Promise<TransferRow>;
     /** Only returns the transfer if `ownerId` sent it. */
     getTransfer(id: string, ownerId: string): Promise<TransferRow | null>;
@@ -218,8 +267,43 @@ export interface Store {
       txSig: string | null;
       status: MovementRow['status'];
     }): Promise<MovementRow>;
+    /** Records which payment index an agent's transfer used. */
+    recordAgentPayment(input: {
+      transferId: string;
+      agentId: string;
+      index: number;
+    }): Promise<void>;
+    /** An agent's settled payments with index ≥ `fromIndex`, lowest first. */
+    agentPayments(
+      agentId: string,
+      fromIndex: number,
+    ): Promise<{ index: number; transfer: TransferRow }[]>;
     /** Newest first; transfers the user sent or received, plus their deposits and withdrawals. */
     activity(userId: string, opts: { limit: number; before?: Date }): Promise<ActivityItem[]>;
+  };
+
+  agents: {
+    create(
+      input: Omit<AgentRow, 'status' | 'createdAt' | 'policy'> & {
+        policy: Omit<PolicyRow, 'version'>;
+      },
+    ): Promise<AgentRow>;
+    /** Only returns the agent if `ownerId` owns it. */
+    get(ownerId: string, id: string): Promise<AgentRow | null>;
+    list(ownerId: string): Promise<AgentRow[]>;
+    /** Agents that aren't revoked: what counts against the tier's agent limit. */
+    countLive(ownerId: string): Promise<number>;
+    /** Appends a policy version. */
+    setPolicy(agentId: string, policy: Omit<PolicyRow, 'version'>): Promise<PolicyRow>;
+    setStatus(agentId: string, status: AgentStatus): Promise<void>;
+    trace(input: {
+      agentId: string;
+      ownerId: string;
+      requestId: string | null;
+      step: TraceStep;
+      detail: Record<string, unknown>;
+    }): Promise<AgentTraceRow>;
+    traces(agentId: string, opts: { limit: number; requestId?: string }): Promise<AgentTraceRow[]>;
   };
 
   events: {

@@ -19,16 +19,12 @@ import {
   SubmitTransferRequest,
   tierFor,
   validateHandle,
-  vexaWeight,
   WithdrawRequest,
   type ChainContext,
 } from '@vexa/core';
 import {
   decodeConfidentialAccount,
   decodeConfidentialMint,
-  decodeFeeSchedule,
-  decodeStakeRecord,
-  feeDiscountBps,
   findAta,
   findStakeRecord,
   ProofType,
@@ -44,6 +40,7 @@ import { authenticate, principalOf } from '../middleware/auth.js';
 import { idempotent } from '../middleware/idempotency.js';
 import { parseBody } from '../lib/validate.js';
 import { executePlan, PlanFailed } from '../chain/execute.js';
+import { readFeeSchedule, readVexaPosition } from '../lib/tier.js';
 import {
   checkPlan,
   SponsorshipRefused,
@@ -71,46 +68,9 @@ async function owner(c: C) {
   };
 }
 
-async function feeSchedule(c: C) {
-  const { chain, vault } = c.get('deps');
-  const data = await chain.getAccountData(vault.fees);
-  return data ? decodeFeeSchedule(data) : null;
-}
-
-/**
- * A user's $VEXA position: what's staked in the vault and what sits in their
- * wallet, and the weight and tier they add up to. $VEXA balances are public
- * token balances, not money movements, so returning them is fine.
- */
-async function vexaPosition(c: C, wallet: Address, fees: Awaited<ReturnType<typeof feeSchedule>>) {
-  if (!fees?.vexaMint) return null;
-  const { chain, vault } = c.get('deps');
-  const [walletAccount, stakeRecord] = await Promise.all([
-    findAta(wallet, fees.vexaMint, TOKEN_PROGRAM),
-    findStakeRecord(wallet, vault.program),
-  ]);
-  const [walletData, stakeData] = await Promise.all([
-    chain.getAccountData(walletAccount),
-    chain.getAccountData(stakeRecord),
-  ]);
-  const held =
-    walletData && walletData.length >= 72
-      ? new DataView(walletData.buffer, walletData.byteOffset).getBigUint64(64, true)
-      : 0n;
-  const stake = stakeData ? decodeStakeRecord(stakeData) : null;
-  const staked = stake && stake.vexaMint === fees.vexaMint ? stake.amount : 0n;
-  const weight = vexaWeight(staked, held);
-  return {
-    vexaMint: fees.vexaMint,
-    walletAccount: walletData ? walletAccount : null,
-    stakeRecord: stake ? stakeRecord : null,
-    held,
-    staked,
-    unlockAt: stake?.unlockAt ?? null,
-    weight,
-    discountBps: feeDiscountBps(fees, weight),
-  };
-}
+const feeSchedule = (c: C) => readFeeSchedule(c.get('deps'));
+const vexaPosition = (c: C, wallet: Address, fees: Awaited<ReturnType<typeof feeSchedule>>) =>
+  readVexaPosition(c.get('deps'), wallet, fees);
 
 /** The accounts to present to the vault for a fee discount, if any is earned. */
 async function vexaDiscount(
@@ -407,15 +367,44 @@ export const money = new Hono<AppBindings>()
       );
     }
     const me = await owner(c);
-    const parsed = validateHandle(body.to);
-    const recipient = parsed.ok ? await store.handles.resolve(parsed.handle) : null;
-    if (!recipient) throw notFound('Recipient');
+    const { userId } = principalOf(c);
+
+    // The payer: the user, or one of their agents.
+    let payer = { cusdc: me.cusdc, agentId: null as string | null };
+    if (body.agentId) {
+      const agent = await store.agents.get(userId, body.agentId);
+      if (!agent) throw notFound('Agent');
+      payer = { cusdc: address(agent.cusdcAccount), agentId: agent.id };
+    }
+
+    // The recipient: a handle, or (to fund it) one of the user's own agents.
+    let recipient: {
+      handle: string | null;
+      solanaPubkey: string;
+      elgamalPubkey: string;
+      ownerId: string | null;
+    };
+    if (body.to.startsWith('agent:')) {
+      const agent = await store.agents.get(userId, body.to.slice('agent:'.length));
+      if (!agent) throw notFound('Agent');
+      recipient = {
+        handle: null,
+        solanaPubkey: agent.solanaPubkey,
+        elgamalPubkey: agent.elgamalPubkey,
+        ownerId: userId,
+      };
+    } else {
+      const parsed = validateHandle(body.to);
+      const resolved = parsed.ok ? await store.handles.resolve(parsed.handle) : null;
+      if (!resolved) throw notFound('Recipient');
+      recipient = { ...resolved, ownerId: await recipientOwnerId(c, resolved.handle) };
+    }
     const recipientCusdc = await findAta(
       address(recipient.solanaPubkey),
       vault.cusdcMint,
       TOKEN_2022_PROGRAM,
     );
-    if (recipientCusdc === me.cusdc)
+    if (recipientCusdc === payer.cusdc)
       throw new ApiError(400, ErrorCode.InvalidRequest, 'Cannot send to yourself');
 
     const data = await chain.getAccountData(recipientCusdc);
@@ -423,14 +412,14 @@ export const money = new Hono<AppBindings>()
       throw new ApiError(
         409,
         ErrorCode.RecipientNotReady,
-        `${formatHandle(recipient.handle)} can’t receive yet`,
+        `${recipient.handle ? formatHandle(recipient.handle) : 'The agent'} can’t receive yet`,
       );
     }
-    const recipientProfileId = await recipientOwnerId(c, recipient.handle);
     const transfer = await store.money.createTransfer({
       fromOwnerId: me.userId,
-      fromPubkey: me.cusdc,
-      toOwnerId: recipientProfileId,
+      fromAgentId: payer.agentId,
+      fromPubkey: payer.cusdc,
+      toOwnerId: recipient.ownerId,
       toHandle: recipient.handle,
       toPubkey: recipientCusdc,
       mode: 'standard',
@@ -439,7 +428,7 @@ export const money = new Hono<AppBindings>()
       {
         transferId: transfer.id,
         recipient: {
-          handle: formatHandle(recipient.handle),
+          handle: recipient.handle ? formatHandle(recipient.handle) : null,
           solanaPubkey: recipient.solanaPubkey,
           elgamalPubkey: recipient.elgamalPubkey,
           cusdcAccount: recipientCusdc,
@@ -458,6 +447,13 @@ export const money = new Hono<AppBindings>()
     const me = await owner(c);
     const transfer = await store.money.getTransfer(body.transferId, me.userId);
     if (!transfer) throw notFound('Transfer');
+    if (transfer.fromAgentId) {
+      throw new ApiError(
+        400,
+        ErrorCode.InvalidRequest,
+        'An agent’s payment is submitted with POST /v1/agents/{id}/payments',
+      );
+    }
     if (transfer.status !== 'pending') {
       throw new ApiError(
         409,
