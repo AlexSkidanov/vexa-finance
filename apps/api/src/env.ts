@@ -39,6 +39,10 @@ const EnvSchema = z.object({
   VAULT_PROGRAM_ID: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/),
   USDC_MINT: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/),
   CUSDC_MINT: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/),
+  // Inbound chain notifications. Without the signing key the receiver is disabled.
+  ALCHEMY_WEBHOOK_SIGNING_KEY: z.string().optional(),
+  ALCHEMY_WEBHOOK_ID: z.string().optional(),
+  ALCHEMY_NOTIFY_AUTH_TOKEN: z.string().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema> & {

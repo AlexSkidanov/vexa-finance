@@ -125,6 +125,7 @@ export interface Store {
   profiles: {
     get(userId: string): Promise<ProfileRow | null>;
     findByHandle(handle: string): Promise<ProfileRow | null>;
+    findBySolanaPubkey(pubkey: string): Promise<ProfileRow | null>;
     /** Atomically registers the handle and binds both keys. Throws HandleConflict. */
     claimHandle(input: {
       userId: string;
@@ -210,6 +211,7 @@ export interface Store {
       txSig: string | null;
       status: MovementRow['status'];
     }): Promise<MovementRow>;
+    hasDeposit(txSig: string): Promise<boolean>;
     recordWithdrawal(input: {
       ownerId: string;
       destination: string;
@@ -247,6 +249,19 @@ export interface Store {
       responseStatus: number | null,
       nextAttemptAt: Date | null,
     ): Promise<void>;
+  };
+
+  /** Inbound chain notifications, processed by the indexer with retries. */
+  chainEvents: {
+    /** Returns false if this (source, externalId) was already queued. */
+    enqueue(input: { source: string; externalId: string; payload: unknown }): Promise<boolean>;
+    claimDue(
+      limit: number,
+      leaseSeconds: number,
+    ): Promise<{ id: string; attempts: number; payload: unknown }[]>;
+    markDone(id: string): Promise<void>;
+    /** Retries at `nextAttemptAt`, or parks the event as dead when it's null. */
+    markFailed(id: string, error: string, nextAttemptAt: Date | null): Promise<void>;
   };
 
   ping(): Promise<void>;

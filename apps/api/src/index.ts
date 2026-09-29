@@ -7,6 +7,14 @@ import { createSupabaseTokenVerifier } from './lib/tokens.js';
 import { createPostgresStore } from './store/postgres.js';
 import { createRpcChain } from './chain/chain.js';
 import { startWebhookWorker } from './workers/webhooks.js';
+import { startIndexer } from './indexer/worker.js';
+import { watchAddresses } from './indexer/notify.js';
+import {
+  ASSOCIATED_TOKEN_PROGRAM,
+  SYSTEM_PROGRAM,
+  TOKEN_2022_PROGRAM,
+  ZK_ELGAMAL_PROOF_PROGRAM,
+} from '@vexa/core/solana';
 import { address } from '@solana/kit';
 import { findAta, findVaultConfig, TOKEN_PROGRAM } from '@vexa/core/solana';
 
@@ -53,6 +61,32 @@ const stopWebhookWorker = startWebhookWorker({
   masterSecret: env.WEBHOOK_SIGNING_SECRET,
 });
 
+const stopIndexer = startIndexer({
+  store,
+  logger: logger.child({ worker: 'indexer' }),
+  vaultProgram: vault.program,
+  ignore: new Set([
+    chain.feePayer,
+    vault.program,
+    vault.config,
+    vault.usdcMint,
+    vault.cusdcMint,
+    vault.usdcReserve,
+    TOKEN_PROGRAM,
+    TOKEN_2022_PROGRAM,
+    ASSOCIATED_TOKEN_PROGRAM,
+    SYSTEM_PROGRAM,
+    ZK_ELGAMAL_PROOF_PROGRAM,
+  ]),
+});
+// Make sure the reserve is watched, so every deposit reaches the indexer.
+void watchAddresses({
+  authToken: env.ALCHEMY_NOTIFY_AUTH_TOKEN,
+  webhookId: env.ALCHEMY_WEBHOOK_ID,
+  addresses: [vault.usdcReserve],
+  logger,
+});
+
 const server = serve({ fetch: app.fetch, port: env.PORT }, (info) => {
   logger.info(
     { port: info.port, cluster: env.SOLANA_CLUSTER, environment: env.API_ENVIRONMENT },
@@ -69,6 +103,7 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     shuttingDown = true;
     logger.info({ signal }, 'shutting down');
     stopWebhookWorker();
+    stopIndexer();
     server.close(async () => {
       await store.close();
       process.exit(0);

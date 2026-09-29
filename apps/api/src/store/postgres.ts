@@ -107,6 +107,10 @@ export function createPostgresStore(url: string): Store & { close(): Promise<voi
         return row ? toProfile(row) : null;
       },
 
+      async findBySolanaPubkey(pubkey) {
+        const [row] = await sql`select * from public.profiles where solana_pubkey = ${pubkey}`;
+        return row ? toProfile(row) : null;
+      },
       async findByHandle(handle) {
         const [row] = await sql`select * from public.profiles where handle = ${handle}`;
         return row ? toProfile(row) : null;
@@ -292,6 +296,10 @@ export function createPostgresStore(url: string): Store & { close(): Promise<voi
           returning *`;
         return toMovement(row!);
       },
+      async hasDeposit(txSig) {
+        const rows = await sql`select 1 from public.deposits where tx_sig = ${txSig}`;
+        return rows.length > 0;
+      },
       async recordWithdrawal({ ownerId, destination, txSig, status }) {
         const [row] = await sql`
           insert into public.withdrawals (owner_id, destination, tx_sig, status)
@@ -424,6 +432,43 @@ export function createPostgresStore(url: string): Store & { close(): Promise<voi
         await sql`
           update public.webhook_deliveries
           set status = ${nextAttemptAt ? 'pending' : 'dead'}, response_status = ${responseStatus},
+              next_attempt_at = coalesce(${nextAttemptAt}, next_attempt_at)
+          where id = ${id}`;
+      },
+    },
+
+    chainEvents: {
+      async enqueue({ source, externalId, payload }) {
+        const rows = await sql`
+          insert into public.chain_events (source, external_id, payload)
+          values (${source}, ${externalId}, ${sql.json(payload as postgres.JSONValue)})
+          on conflict (source, external_id) do nothing
+          returning id`;
+        return rows.length > 0;
+      },
+      async claimDue(limit, leaseSeconds) {
+        const rows = await sql`
+          update public.chain_events e
+          set status = 'processing', attempts = e.attempts + 1,
+              next_attempt_at = now() + make_interval(secs => ${leaseSeconds})
+          where e.id in (
+            select id from public.chain_events
+            where (status = 'pending' and next_attempt_at <= now())
+               or (status = 'processing' and next_attempt_at <= now())
+            order by next_attempt_at
+            limit ${limit}
+            for update skip locked
+          )
+          returning e.id, e.attempts, e.payload`;
+        return rows.map((r) => ({ id: r.id, attempts: r.attempts, payload: r.payload }));
+      },
+      async markDone(id) {
+        await sql`update public.chain_events set status = 'done', last_error = null where id = ${id}`;
+      },
+      async markFailed(id, error, nextAttemptAt) {
+        await sql`
+          update public.chain_events
+          set status = ${nextAttemptAt ? 'pending' : 'dead'}, last_error = ${error.slice(0, 1000)},
               next_attempt_at = coalesce(${nextAttemptAt}, next_attempt_at)
           where id = ${id}`;
       },

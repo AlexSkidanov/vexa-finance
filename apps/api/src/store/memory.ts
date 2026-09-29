@@ -39,6 +39,18 @@ export function createMemoryStore(): Store {
   const withdrawals: MovementRow[] = [];
   const events: EventRow[] = [];
   const hooks = new Map<string, WebhookRow>();
+  const chainEvents = new Map<
+    string,
+    {
+      id: string;
+      key: string;
+      attempts: number;
+      payload: unknown;
+      status: string;
+      due: number;
+      error?: string;
+    }
+  >();
   const deliveries = new Map<
     string,
     Omit<DueDelivery, 'url' | 'secretEncrypted'> & {
@@ -64,6 +76,9 @@ export function createMemoryStore(): Store {
     profiles: {
       async get(userId) {
         return profile(userId);
+      },
+      async findBySolanaPubkey(pubkey) {
+        return [...profiles.values()].find((p) => p.solanaPubkey === pubkey) ?? null;
       },
       async findByHandle(handle) {
         return [...profiles.values()].find((p) => p.handle === handle) ?? null;
@@ -225,6 +240,9 @@ export function createMemoryStore(): Store {
         deposits.push(row);
         return row;
       },
+      async hasDeposit(txSig) {
+        return deposits.some((d) => d.txSig === txSig);
+      },
       async recordWithdrawal({ ownerId, destination, txSig, status }) {
         const row: MovementRow = {
           id: randomUUID(),
@@ -342,6 +360,40 @@ export function createMemoryStore(): Store {
         d.responseStatus = responseStatus;
         if (nextAttemptAt) d.nextAttemptAt = nextAttemptAt.getTime();
         else d.status = 'dead';
+      },
+    },
+
+    chainEvents: {
+      async enqueue({ source, externalId, payload }) {
+        const key = `${source}:${externalId}`;
+        if ([...chainEvents.values()].some((e) => e.key === key)) return false;
+        const id = randomUUID();
+        chainEvents.set(id, { id, key, attempts: 0, payload, status: 'pending', due: Date.now() });
+        return true;
+      },
+      async claimDue(limit, leaseSeconds) {
+        const now = Date.now();
+        return [...chainEvents.values()]
+          .filter((e) => (e.status === 'pending' || e.status === 'processing') && e.due <= now)
+          .slice(0, limit)
+          .map((e) => {
+            Object.assign(e, {
+              status: 'processing',
+              attempts: e.attempts + 1,
+              due: now + leaseSeconds * 1000,
+            });
+            return { id: e.id, attempts: e.attempts, payload: e.payload };
+          });
+      },
+      async markDone(id) {
+        const e = chainEvents.get(id);
+        if (e) e.status = 'done';
+      },
+      async markFailed(id, error, nextAttemptAt) {
+        const e = chainEvents.get(id);
+        if (!e) return;
+        Object.assign(e, { error, status: nextAttemptAt ? 'pending' : 'dead' });
+        if (nextAttemptAt) e.due = nextAttemptAt.getTime();
       },
     },
 
