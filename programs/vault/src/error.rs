@@ -49,6 +49,8 @@ pub enum VaultError {
     VexaNotSet = 20,
     /// Unstaking more than is staked.
     InsufficientStake = 21,
+    /// A proof context doesn't hold the proof it was required to.
+    ContextMismatch = 22,
 }
 
 impl From<VaultError> for ProgramError {

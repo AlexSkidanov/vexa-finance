@@ -1,6 +1,6 @@
 [package]
 name = "vexa-vault"
-version = "0.4.0"
+version = "0.5.0"
 description = "Wraps USDC 1:1 into cUSDC, a Token-2022 mint with confidential transfers"
 edition.workspace = true
 rust-version.workspace = true
@@ -17,11 +17,13 @@ name = "vault"
 pinocchio = { version = "0.11.2", default-features = false, features = ["cpi"] }
 pinocchio-system = "0.6.1"
 solana-address = { version = "~2.7.0", default-features = false, features = ["copy", "decode", "syscalls", "sha2"] }
+solana-sha256-hasher = { version = "3.1.0", default-features = false }
 
 # On the host (unit tests, cargo check) PDA derivation needs the curve library
 # that the on-chain syscall replaces.
 [target.'cfg(not(target_os = "solana"))'.dependencies]
 solana-address = { version = "~2.7.0", features = ["curve25519"] }
+solana-sha256-hasher = { version = "3.1.0", features = ["sha2"] }
 
 [dev-dependencies]
 litesvm = "0.17.0"
@@ -34,6 +36,7 @@ solana-pubkey = "3"
 solana-clock = "3"
 solana-system-interface = { version = "2", features = ["bincode"] }
 bytemuck = "1"
+sha2 = "0.10"
 spl-token-2022-interface = "2.1.0"
 spl-token-interface = "2.0.0"
 spl-associated-token-account-interface = "2.0.0"

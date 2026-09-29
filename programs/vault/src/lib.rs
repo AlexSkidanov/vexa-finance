@@ -84,5 +84,6 @@ pub fn process_instruction(
         VaultInstruction::SetFees => processor::admin::set_fees(accounts, args),
         VaultInstruction::Stake => processor::stake::stake(accounts, args),
         VaultInstruction::Unstake => processor::stake::unstake(accounts, args),
+        VaultInstruction::RequireContexts => processor::contexts::require(accounts, args),
     }
 }

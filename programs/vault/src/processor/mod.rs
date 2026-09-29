@@ -1,5 +1,6 @@
 pub mod admin;
 pub mod configure;
+pub mod contexts;
 pub mod deposit;
 pub mod initialize;
 pub mod stake;

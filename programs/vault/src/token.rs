@@ -22,6 +22,8 @@ pub const ASSOCIATED_TOKEN_PROGRAM_ID: Address =
 pub const SYSTEM_PROGRAM_ID: Address = Address::from_str_const("11111111111111111111111111111111");
 pub const BPF_LOADER_UPGRADEABLE_ID: Address =
     Address::from_str_const("BPFLoaderUpgradeab1e11111111111111111111111");
+pub const ZK_ELGAMAL_PROOF_PROGRAM_ID: Address =
+    Address::from_str_const("ZkE1Gama1Proof11111111111111111111111111111");
 pub const INSTRUCTIONS_SYSVAR_ID: Address =
     Address::from_str_const("Sysvar1nstructions1111111111111111111111111");
 

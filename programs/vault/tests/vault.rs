@@ -665,6 +665,96 @@ fn nobody_can_borrow_someone_elses_stake_for_a_discount() {
 }
 
 // ---------------------------------------------------------------------------
+// proof contexts (agent payments)
+// ---------------------------------------------------------------------------
+
+const ZK_PROGRAM: Pubkey = Pubkey::from_str_const("ZkE1Gama1Proof11111111111111111111111111111");
+/// Range proof U64 context account: authority (32) | proof type (1) | context (264).
+const RANGE_CONTEXT_LEN: usize = 297;
+
+/// Verifies a fresh range proof into a new context account; returns it.
+fn verified_range_context(env: &mut Env, payer: &Keypair, amount: u64) -> Pubkey {
+    let keypair = zk_sdk::encryption::elgamal::ElGamalKeypair::new_rand();
+    let balance = keypair.pubkey().encrypt(amount + 1);
+    let proofs = withdraw_proof_data(&balance, amount + 1, amount, &keypair).unwrap();
+    let context = Keypair::new();
+    let rent = env.svm.minimum_balance_for_rent_exemption(RANGE_CONTEXT_LEN);
+    let create = solana_system_interface::instruction::create_account(
+        &payer.pubkey(),
+        &context.pubkey(),
+        rent,
+        RANGE_CONTEXT_LEN as u64,
+        &ZK_PROGRAM,
+    );
+    let verify = ProofInstruction::VerifyBatchedRangeProofU64.encode_verify_proof(
+        Some(zk_proof_interface::instruction::ContextStateInfo {
+            context_state_account: &context.pubkey(),
+            context_state_authority: &payer.pubkey(),
+        }),
+        &proofs.range_proof_data,
+    );
+    env.send(&[create, verify], payer, &[&context]).unwrap();
+    context.pubkey()
+}
+
+fn require_contexts_ix(contexts: &[(Pubkey, [u8; 32])]) -> Instruction {
+    let data: Vec<u8> = contexts.iter().flat_map(|(_, h)| *h).collect();
+    vault_ix(
+        VaultInstruction::RequireContexts,
+        &data,
+        contexts.iter().map(|(c, _)| AccountMeta::new_readonly(*c, false)).collect(),
+    )
+}
+
+fn context_hash(env: &Env, context: &Pubkey) -> [u8; 32] {
+    use sha2::Digest;
+    let data = env.svm.get_account(context).unwrap().data;
+    sha2::Sha256::digest(&data[32..]).into()
+}
+
+#[test]
+fn require_contexts_passes_only_for_the_exact_verified_proofs() {
+    let mut env = setup();
+    let payer = env.admin.insecure_clone();
+    let first = verified_range_context(&mut env, &payer, 10);
+    let second = verified_range_context(&mut env, &payer, 20);
+    let (h1, h2) = (context_hash(&env, &first), context_hash(&env, &second));
+
+    env.send(&[require_contexts_ix(&[(first, h1), (second, h2)])], &payer, &[]).unwrap();
+
+    // A different proof in the account than the one approved.
+    let err = env.send(&[require_contexts_ix(&[(first, h2)])], &payer, &[]).unwrap_err();
+    assert!(err.contains(&code(VaultError::ContextMismatch)), "{err}");
+
+    // An account that was allocated for a context but never verified into.
+    let empty = Keypair::new();
+    let create = solana_system_interface::instruction::create_account(
+        &payer.pubkey(),
+        &empty.pubkey(),
+        env.svm.minimum_balance_for_rent_exemption(RANGE_CONTEXT_LEN),
+        RANGE_CONTEXT_LEN as u64,
+        &ZK_PROGRAM,
+    );
+    env.send(&[create], &payer, &[&empty]).unwrap();
+    let zeros: [u8; 32] = {
+        use sha2::Digest;
+        sha2::Sha256::digest([0u8; RANGE_CONTEXT_LEN - 32]).into()
+    };
+    let err =
+        env.send(&[require_contexts_ix(&[(empty.pubkey(), zeros)])], &payer, &[]).unwrap_err();
+    assert!(err.contains(&code(VaultError::ContextMismatch)), "{err}");
+
+    // Data that looks right but lives in an account the proof program doesn't own.
+    let err = env.send(&[require_contexts_ix(&[(env.reserve, h1)])], &payer, &[]).unwrap_err();
+    assert!(err.contains(&code(VaultError::ContextMismatch)), "{err}");
+
+    // Hashes and accounts must pair up.
+    let mut ix = require_contexts_ix(&[(first, h1)]);
+    ix.data.pop();
+    assert!(env.send(&[ix], &payer, &[]).is_err());
+}
+
+// ---------------------------------------------------------------------------
 // invariant
 // ---------------------------------------------------------------------------
 
