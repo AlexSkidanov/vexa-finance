@@ -29,7 +29,8 @@ import { createTestbed, vaultBinaryExists, type Testbed, type Wallet } from './s
 
 const USDC = 1_000_000n;
 
-describe.skipIf(!vaultBinaryExists())('money flow on LiteSVM', () => {
+// Proof generation is CPU-bound; shared CI runners need more than the 5 s default.
+describe.skipIf(!vaultBinaryExists())('money flow on LiteSVM', { timeout: 30_000 }, () => {
   let bed: Testbed;
 
   beforeAll(async () => {

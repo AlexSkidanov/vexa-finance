@@ -57,7 +57,8 @@ function litesvmChain(bed: Testbed): Chain {
   };
 }
 
-describe.skipIf(!vaultBinaryExists())('money over HTTP, on LiteSVM', () => {
+// Proof generation is CPU-bound; shared CI runners need more than the 5 s default.
+describe.skipIf(!vaultBinaryExists())('money over HTTP, on LiteSVM', { timeout: 30_000 }, () => {
   let bed: Testbed;
   let api: ReturnType<typeof testApp>;
 
