@@ -7,6 +7,7 @@ export default defineConfig({
   platform: 'node',
   sourcemap: true,
   clean: true,
-  // Bundle workspace packages so the deploy artifact doesn't depend on the monorepo layout.
-  noExternal: [/^@vexa\//],
+  // Nothing from node_modules is bundled: some packages load WebAssembly
+  // relative to their own files. The Docker image ships them with `pnpm deploy`.
+  skipNodeModulesBundle: true,
 });
