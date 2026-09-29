@@ -63,10 +63,11 @@ jobs:
         run: ls -l target/deploy/vault.so
       # After the build: the tests embed target/deploy/vault.so, and clippy
       # compiles them.
-      - run: cargo clippy -p vexa-vault --all-targets -- -D warnings
+      - run: cargo clippy -p vexa-vault -p vexa-agent-proofs --all-targets -- -D warnings
       # LiteSVM tests against the freshly built binary, with the same runtime
-      # and ZK SDK versions as mainnet.
-      - run: cargo test -p vexa-vault
+      # and ZK SDK versions as mainnet. The agent proofs verify with the same
+      # zk-sdk the cluster uses.
+      - run: cargo test -p vexa-vault -p vexa-agent-proofs
 
       # The same binary, driven end to end from TypeScript: proofs built by the
       # SDK, plans checked and co-signed by the API.
@@ -77,10 +78,33 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm turbo run build --filter=@vexa/core --filter=@vexa/sdk
-      - name: Money flow on LiteSVM
+      - name: Money, staking and agent payments on LiteSVM
         run: |
-          pnpm --filter @vexa/core exec vitest run test/flow.litesvm.test.ts
-          pnpm --filter @vexa/api exec vitest run test/money.litesvm.test.ts
+          pnpm --filter @vexa/core exec vitest run litesvm
+          pnpm --filter @vexa/api exec vitest run litesvm
+
+  near:
+    name: NEAR policy contract (fmt, clippy, test, wasm)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts/near-policy
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain (from rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - run: rustup target add wasm32-unknown-unknown
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            contracts/near-policy/target
+          key: near-${{ runner.os }}-${{ hashFiles('contracts/near-policy/Cargo.lock') }}
+      - run: cargo fmt -- --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+      - run: cargo build --target wasm32-unknown-unknown --release
 
   secrets:
     name: Secret scan

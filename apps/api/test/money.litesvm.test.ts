@@ -346,7 +346,7 @@ describe.skipIf(!vaultBinaryExists())('money over HTTP, on LiteSVM', { timeout: 
       vexaMint,
       amount: USDC,
     });
-    const ix = plan.stages[0]![0]!.instructions[0]! as { accounts: { address: string }[] };
+    const ix = plan.stages[0]![0]!.instructions[0]! as unknown as { accounts: { address: string }[] };
     ix.accounts[7]!.address = await findStakeRecord(victim.wallet.signer.address);
     const compiled = await compilePlan(plan, {
       feePayer: bed.feePayer.address,

@@ -28,6 +28,8 @@ import {
   pipe,
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
+  setTransactionMessageLifetimeUsingDurableNonce,
+  type Nonce,
   type Address,
   type Blockhash,
   type Instruction,
@@ -63,7 +65,17 @@ import {
 } from './vault.js';
 
 export type PlanKind =
-  'configure' | 'deposit' | 'apply-pending' | 'transfer' | 'withdraw' | 'stake' | 'unstake';
+  | 'configure'
+  | 'deposit'
+  | 'apply-pending'
+  | 'transfer'
+  | 'withdraw'
+  | 'stake'
+  | 'unstake'
+  | 'agent-configure'
+  | 'agent-apply-pending'
+  | 'agent-payment'
+  | 'agent-sweep';
 
 export type StepLabel =
   | 'fund-and-configure'
@@ -76,10 +88,17 @@ export type StepLabel =
   | 'transfer'
   | 'withdraw'
   | 'stake'
-  | 'unstake';
+  | 'unstake'
+  | 'verify-limit'
+  | 'agent-transfer';
 
 export interface PlannedTransaction {
   label: StepLabel;
+  /**
+   * Use a durable nonce instead of the recent blockhash. The nonce advance is
+   * prepended to the instructions. Agent payments use this.
+   */
+  durableNonce?: { nonceAccount: Address; authority: Address; nonce: string };
   instructions: Instruction[];
 }
 
@@ -553,16 +572,23 @@ export async function compilePlan(
   for (const stage of plan.stages) {
     const compiled: CompiledTransaction[] = [];
     for (const step of stage) {
-      const message = pipe(
-        createTransactionMessage({ version: 0 }),
-        (m) => setTransactionMessageFeePayerSigner(feePayer, m),
-        (m) =>
-          setTransactionMessageLifetimeUsingBlockhash(
-            { blockhash: opts.blockhash, lastValidBlockHeight: opts.lastValidBlockHeight },
-            m,
-          ),
-        (m) => appendTransactionMessageInstructions(step.instructions, m),
+      const base = pipe(createTransactionMessage({ version: 0 }), (m) =>
+        setTransactionMessageFeePayerSigner(feePayer, m),
       );
+      const timed = step.durableNonce
+        ? setTransactionMessageLifetimeUsingDurableNonce(
+            {
+              nonce: step.durableNonce.nonce as Nonce,
+              nonceAccountAddress: step.durableNonce.nonceAccount,
+              nonceAuthorityAddress: step.durableNonce.authority,
+            },
+            base,
+          )
+        : setTransactionMessageLifetimeUsingBlockhash(
+            { blockhash: opts.blockhash, lastValidBlockHeight: opts.lastValidBlockHeight },
+            base,
+          );
+      const message = appendTransactionMessageInstructions(step.instructions, timed);
       const signed = await partiallySignTransactionMessageWithSigners(message);
       compiled.push({ label: step.label, transaction: getBase64EncodedWireTransaction(signed) });
     }

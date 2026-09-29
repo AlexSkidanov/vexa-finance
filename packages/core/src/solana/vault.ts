@@ -31,6 +31,7 @@ export const VaultInstruction = {
   SetFees: 6,
   Stake: 7,
   Unstake: 8,
+  RequireContexts: 9,
 } as const;
 
 export interface VaultAccounts {
@@ -266,4 +267,23 @@ export function decodeStakeRecord(data: Uint8Array): StakeRecord | null {
     amount: view.getBigUint64(66, true),
     unlockAt: Number(view.getBigInt64(74, true)),
   };
+}
+
+/**
+ * Fails unless each proof context account holds exactly the proof whose
+ * `sha256(proof_type ‖ context)` is given. Binds an agent payment to the
+ * proofs the NEAR policy contract approved.
+ */
+export function requireContextsInstruction(input: {
+  program?: Address;
+  contexts: { account: Address; hash: Uint8Array }[];
+}): Instruction {
+  const data = new Uint8Array(1 + 32 * input.contexts.length);
+  data[0] = VaultInstruction.RequireContexts;
+  input.contexts.forEach((c, i) => data.set(c.hash, 1 + 32 * i));
+  return {
+    programAddress: input.program ?? VAULT_PROGRAM,
+    accounts: input.contexts.map((c) => ro(c.account)),
+    data,
+  } as Instruction;
 }

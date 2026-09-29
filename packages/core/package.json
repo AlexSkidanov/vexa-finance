@@ -20,10 +20,16 @@
       "types": "./dist/solana/index.d.ts",
       "import": "./dist/solana/index.js",
       "require": "./dist/solana/index.cjs"
+    },
+    "./agent": {
+      "types": "./dist/agent/index.d.ts",
+      "import": "./dist/agent/index.js",
+      "require": "./dist/agent/index.cjs"
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "wasm"
   ],
   "scripts": {
     "build": "tsup",

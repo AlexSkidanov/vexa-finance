@@ -4,7 +4,7 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['**/dist/**', '**/node_modules/**', '**/target/**', '**/.anchor/**', '**/*.d.ts'],
+    ignores: ['**/dist/**', '**/node_modules/**', '**/target/**', '**/.anchor/**', '**/*.d.ts', 'packages/core/wasm/**'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

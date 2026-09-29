@@ -98,6 +98,18 @@ const PLAN_SHAPES: Record<PlanKind, StepLabel[][]> = {
   withdraw: [['verify-equality'], ['verify-range'], ['withdraw']],
   stake: [['stake']],
   unstake: [['unstake']],
+  'agent-configure': [['fund-and-configure']],
+  'agent-apply-pending': [['apply-pending']],
+  'agent-payment': [
+    ['create-proof-contexts'],
+    ['verify-equality-and-validity', 'verify-range', 'verify-limit'],
+    ['agent-transfer'],
+  ],
+  'agent-sweep': [
+    ['create-proof-contexts'],
+    ['verify-equality-and-validity', 'verify-range'],
+    ['agent-transfer'],
+  ],
 };
 
 const MAX_TRANSACTION_BYTES = 1232;

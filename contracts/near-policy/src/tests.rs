@@ -91,6 +91,19 @@ fn setup(policy: Policy) -> Setup {
     Setup { contract, owner, authority, nonce_account, now_ms }
 }
 
+/// Solana's compact-u16 length prefix.
+fn compact(out: &mut Vec<u8>, mut n: usize) {
+    loop {
+        let byte = (n & 0x7f) as u8;
+        n >>= 7;
+        if n == 0 {
+            out.push(byte);
+            return;
+        }
+        out.push(byte | 0x80);
+    }
+}
+
 /// A legacy message: signers first, then everything else, deduplicated.
 fn message(signers: &[Pubkey], ixs: &[(Pubkey, Vec<Pubkey>, Vec<u8>)]) -> Vec<u8> {
     let mut keys: Vec<Pubkey> = signers.to_vec();
@@ -112,7 +125,7 @@ fn message(signers: &[Pubkey], ixs: &[(Pubkey, Vec<Pubkey>, Vec<u8>)]) -> Vec<u8
         out.push(index(program));
         out.push(accounts.len() as u8);
         out.extend(accounts.iter().map(index));
-        out.push(data.len() as u8);
+        compact(&mut out, data.len());
         out.extend_from_slice(data);
     }
     out
@@ -177,7 +190,7 @@ fn payment_with(
     require.extend_from_slice(&near_sdk::env::sha256_array(&validity));
     require.extend_from_slice(&near_sdk::env::sha256_array(&limit));
     let mut transfer = vec![27u8, 7];
-    transfer.extend_from_slice(&[0; 36]);
+    transfer.extend_from_slice(&[0; 36 + 128]);
     transfer.extend_from_slice(&[0, 0, 0]);
     let fee_payer = b58(FEE_PAYER);
     let mut ixs = vec![
@@ -352,7 +365,7 @@ fn nothing_else_rides_along_with_a_payment() {
     // A second instruction after the approved transfer, moving the agent's funds.
     let agent = s.contract.agents.get(AGENT).unwrap().clone();
     let mut drain = vec![27u8, 7];
-    drain.extend_from_slice(&[0; 39]);
+    drain.extend_from_slice(&[0; 167]);
     let p = payment_with(
         &s,
         shop(),
@@ -379,7 +392,7 @@ fn a_revoked_agent_can_still_return_funds_to_its_owner() {
 
     let agent = s.contract.agents.get(AGENT).unwrap().clone();
     let mut transfer = vec![27u8, 7];
-    transfer.extend_from_slice(&[0; 39]);
+    transfer.extend_from_slice(&[0; 167]);
     let sweep = message(
         &[b58(FEE_PAYER), agent.address],
         &[

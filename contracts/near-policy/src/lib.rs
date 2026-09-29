@@ -51,6 +51,7 @@ const SYSTEM_ADVANCE_NONCE: [u8; 4] = [4, 0, 0, 0];
 const TOKEN_CONFIDENTIAL: u8 = 27;
 const CT_TRANSFER: u8 = 7;
 const CT_APPLY_PENDING: u8 = 8;
+const CT_TRANSFER_DATA_LEN: usize = 2 + 36 + 64 + 64 + 3;
 const ZK_CLOSE_CONTEXT: u8 = 0;
 const ZK_VERIFY_PUBKEY_VALIDITY: u8 = 4;
 const VAULT_CONFIGURE: u8 = 1;
@@ -648,31 +649,25 @@ impl Contract {
         self.check_payment(agent, ixs, proofs)
     }
 
-    /// Opening the agent's confidential account: a pubkey validity proof, an
-    /// optional rent transfer from the fee payer, and the vault's configure.
+    /// Opening the agent's confidential account, as `configurePlan` builds
+    /// it: an optional rent transfer from the fee payer to the agent, the
+    /// pubkey validity proof, and the vault's configure.
     fn is_configure(&self, agent: &Agent, ixs: &[Instruction]) -> bool {
-        let (proof, rest) = match ixs.split_first() {
-            Some(split) => split,
-            None => return false,
-        };
-        if proof.program != solana::ZK_ELGAMAL_PROOF_PROGRAM
-            || proof.data.first() != Some(&ZK_VERIFY_PUBKEY_VALIDITY)
-            || !proof.accounts.is_empty()
-        {
-            return false;
-        }
-        let rest = match rest {
-            [transfer, configure]
+        let rest = match ixs {
+            [transfer, rest @ ..]
                 if transfer.program == solana::SYSTEM_PROGRAM
                     && transfer.data.starts_with(&SYSTEM_TRANSFER)
                     && transfer.accounts == [self.fee_payer, agent.address] =>
             {
-                core::slice::from_ref(configure)
+                rest
             }
             other => other,
         };
-        matches!(rest, [configure]
-            if configure.program == self.vault_program
+        matches!(rest, [proof, configure]
+            if proof.program == solana::ZK_ELGAMAL_PROOF_PROGRAM
+                && proof.data.first() == Some(&ZK_VERIFY_PUBKEY_VALIDITY)
+                && proof.accounts.is_empty()
+                && configure.program == self.vault_program
                 && configure.data.first() == Some(&VAULT_CONFIGURE)
                 && configure.accounts.first() == Some(&agent.address)
                 && configure.accounts.get(3) == Some(&agent.cusdc))
@@ -706,11 +701,14 @@ impl Contract {
         };
 
         let transfer = next;
+        // Data: tag, sub-tag, new decryptable balance (36), auditor ciphertexts
+        // lo and hi (64 each), then the three proof offsets, all zero because
+        // the proofs are in context accounts.
         if transfer.program != solana::TOKEN_2022_PROGRAM
-            || transfer.data.len() != 41
+            || transfer.data.len() != CT_TRANSFER_DATA_LEN
             || transfer.data[0] != TOKEN_CONFIDENTIAL
             || transfer.data[1] != CT_TRANSFER
-            || transfer.data[38..] != [0, 0, 0]
+            || transfer.data[CT_TRANSFER_DATA_LEN - 3..] != [0, 0, 0]
             || transfer.accounts.len() != 7
         {
             fail(

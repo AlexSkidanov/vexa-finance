@@ -13,7 +13,8 @@
  *
  *   PRF output ─┬─ ConfidentialKeys.fromPrf ─┬─ ElGamal keypair   (decrypts balances, proves transfers)
  *               │                            └─ AE key            (fast local decryption of the available balance)
- *               └─ HKDF("vexa/solana-wallet/v1") ─ ed25519 seed    (signs Solana transactions)
+ *               ├─ HKDF("vexa/solana-wallet/v1") ─ ed25519 seed    (signs Solana transactions)
+ *               └─ HKDF("vexa/agents/v1") ──────── agent root      (each agent's keys: see @vexa/core/agent)
  *
  * Losing the passkey means losing the keys, so users should register more than
  * one passkey. They sync across devices through iCloud Keychain or Google
@@ -34,6 +35,7 @@ import { base58Encode, base64Encode } from '../encoding.js';
 
 const SOLANA_WALLET_INFO = new TextEncoder().encode('vexa/solana-wallet/v1');
 const SOLANA_WALLET_SALT = new TextEncoder().encode('vexa.finance');
+const AGENTS_INFO = new TextEncoder().encode('vexa/agents/v1');
 
 export interface UserKeys {
   /** 32-byte ed25519 seed for the user's Solana wallet. Keep in memory only. */
@@ -44,6 +46,11 @@ export interface UserKeys {
   ae: AeKey;
   /** Base64 ElGamal public key, the form the API and handle resolver use. */
   elgamalPubkey: string;
+  /**
+   * 32-byte root every agent's keys derive from (with the agent id). Lets the
+   * owner re-derive any of their agents' keys, e.g. to take funds back.
+   */
+  agentRoot: Uint8Array;
 }
 
 /**
@@ -68,6 +75,7 @@ export function deriveUserKeys(prfOutput: Uint8Array): UserKeys {
     elgamal,
     ae: confidential.ae(),
     elgamalPubkey: base64Encode(elgamal.pubkey().toBytes()),
+    agentRoot: hkdf(sha256, prfOutput, SOLANA_WALLET_SALT, AGENTS_INFO, 32),
   };
 }
 
