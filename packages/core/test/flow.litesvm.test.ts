@@ -5,12 +5,7 @@
  * run `pnpm build:vault` first; the suite is skipped without it.
  */
 import { beforeAll, describe, expect, it } from 'vitest';
-import {
-  generateKeyPairSigner,
-  getBase64Encoder,
-  getTransactionDecoder,
-  type Transaction,
-} from '@solana/kit';
+import { getBase64Encoder, getTransactionDecoder, type Transaction } from '@solana/kit';
 import { AeCiphertext } from '@solana/zk-sdk';
 import {
   buildTransferProofs,
@@ -26,8 +21,6 @@ import {
   configurePlan,
   decodeConfidentialAccount,
   depositPlan,
-  findAta,
-  TOKEN_PROGRAM,
   transferPlan,
   withdrawPlan,
   type CompiledPlan,
@@ -180,8 +173,8 @@ describe.skipIf(!vaultBinaryExists())('money flow on LiteSVM', () => {
     expect(feePayerBefore - bed.svm.getBalance(bed.feePayer.address)!).toBeLessThan(50_000n);
 
     // Withdraw to an outside wallet that has never seen Vexa.
-    const outside = await generateKeyPairSigner();
-    const destination = await findAta(outside.address, bed.vault.usdcMint, TOKEN_PROGRAM);
+    const outside = await bed.newWallet(0n);
+    const destination = outside.usdc;
     const s = state(alice);
     await compile(
       await withdrawPlan({
@@ -190,7 +183,6 @@ describe.skipIf(!vaultBinaryExists())('money flow on LiteSVM', () => {
         owner: alice.signer,
         ownerCusdc: alice.cusdc,
         destination,
-        createDestinationFor: outside.address,
         amount: 10n * USDC,
         decimals: 6,
         proofs: buildWithdrawProofs({

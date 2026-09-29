@@ -139,3 +139,73 @@ export const CreatedApiKey = ApiKeySummary.extend({
   secret: z.string().refine(isApiKey).optional(),
 });
 export type CreatedApiKey = z.infer<typeof CreatedApiKey>;
+
+// ---------------------------------------------------------------------------
+// Money: every movement is a plan of transactions built and signed on the
+// user's device (see @vexa/core/solana). The API validates and co-signs.
+// ---------------------------------------------------------------------------
+
+export const CompiledPlanSchema = z.object({
+  kind: z.enum(['configure', 'deposit', 'apply-pending', 'transfer', 'withdraw']),
+  stages: z
+    .array(
+      z
+        .array(z.object({ label: z.string().max(64), transaction: z.string().max(2048) }))
+        .min(1)
+        .max(3),
+    )
+    .min(1)
+    .max(4),
+});
+export type CompiledPlanInput = z.infer<typeof CompiledPlanSchema>;
+
+export const SubmitPlanRequest = z.object({ plan: CompiledPlanSchema });
+export type SubmitPlanRequest = z.infer<typeof SubmitPlanRequest>;
+
+export const PrepareTransferRequest = z.object({
+  /** `@alice.vexa`, `@alice` or `alice`. */
+  to: z.string().min(1).max(40),
+  mode: z.enum(['standard', 'stealth']).default('standard'),
+});
+export type PrepareTransferRequest = z.input<typeof PrepareTransferRequest>;
+
+const Base64 = z.string().regex(/^[A-Za-z0-9+/]*={0,2}$/, 'must be base64');
+
+export const SubmitTransferRequest = z.object({
+  transferId: z.uuid(),
+  plan: CompiledPlanSchema,
+  /** Encrypted on the device to the recipient; the API stores it opaquely. */
+  memoCiphertext: Base64.max(1400).optional(),
+});
+export type SubmitTransferRequest = z.infer<typeof SubmitTransferRequest>;
+
+export const WithdrawRequest = z.object({
+  plan: CompiledPlanSchema,
+  /** An existing USDC token account receiving the funds. */
+  destinationAccount: SolanaAddress,
+});
+export type WithdrawRequest = z.infer<typeof WithdrawRequest>;
+
+/** Chain context a device needs to build plans. Lamport values are strings. */
+export const ChainContext = z.object({
+  cluster: z.enum(['mainnet-beta', 'devnet']),
+  feePayer: z.string(),
+  vault: z.object({
+    program: z.string(),
+    config: z.string(),
+    usdcMint: z.string(),
+    cusdcMint: z.string(),
+    usdcReserve: z.string(),
+  }),
+  auditorElgamalPubkey: z.string().nullable(),
+  rent: z.object({
+    confidentialAccount: z.string(),
+    equalityContext: z.string(),
+    validityContext: z.string(),
+    rangeU128Context: z.string(),
+    rangeU64Context: z.string(),
+  }),
+  blockhash: z.string(),
+  lastValidBlockHeight: z.string(),
+});
+export type ChainContext = z.infer<typeof ChainContext>;

@@ -38,7 +38,6 @@ import {
   getApplyConfidentialPendingBalanceInstruction,
   getConfidentialTransferInstruction,
   getConfidentialWithdrawInstruction,
-  getCreateAssociatedTokenIdempotentInstruction,
 } from '@solana-program/token-2022';
 import {
   closeContextStateInstruction,
@@ -46,7 +45,7 @@ import {
   ProofType,
   verifyProofInstruction,
 } from './proof-program.js';
-import { TOKEN_2022_PROGRAM, TOKEN_PROGRAM, ZK_ELGAMAL_PROOF_PROGRAM } from './programs.js';
+import { TOKEN_2022_PROGRAM, ZK_ELGAMAL_PROOF_PROGRAM } from './programs.js';
 import {
   configureConfidentialAccountInstruction,
   depositInstruction,
@@ -338,10 +337,11 @@ export interface WithdrawPlanInput {
   feePayer: Address;
   owner: TransactionSigner;
   ownerCusdc: Address;
-  /** USDC token account receiving the funds. */
+  /**
+   * An existing USDC token account receiving the funds. Creating one costs
+   * permanent rent, which Vexa doesn't sponsor.
+   */
   destination: Address;
-  /** When set, the destination ATA is created for this wallet first (sponsored). */
-  createDestinationFor?: Address;
   amount: bigint;
   decimals: number;
   proofs: {
@@ -357,19 +357,7 @@ export async function withdrawPlan(input: WithdrawPlanInput): Promise<Plan> {
   const [equality, range] = await Promise.all([generateKeyPairSigner(), generateKeyPairSigner()]);
   const ctx = (account: Address) => ({ account, authority: input.feePayer });
 
-  const withdraw: Instruction[] = [];
-  if (input.createDestinationFor) {
-    withdraw.push(
-      getCreateAssociatedTokenIdempotentInstruction({
-        payer: feePayer,
-        ata: input.destination,
-        owner: input.createDestinationFor,
-        mint: input.vault.usdcMint,
-        tokenProgram: TOKEN_PROGRAM,
-      }),
-    );
-  }
-  withdraw.push(
+  const withdraw: Instruction[] = [
     getConfidentialWithdrawInstruction({
       token: input.ownerCusdc,
       mint: input.vault.cusdcMint,
@@ -391,7 +379,7 @@ export async function withdrawPlan(input: WithdrawPlanInput): Promise<Plan> {
     }),
     closeContextStateInstruction(equality.address, input.feePayer, input.feePayer),
     closeContextStateInstruction(range.address, input.feePayer, input.feePayer),
-  );
+  ];
 
   return {
     kind: 'withdraw',
