@@ -209,3 +209,29 @@ export const ChainContext = z.object({
   lastValidBlockHeight: z.string(),
 });
 export type ChainContext = z.infer<typeof ChainContext>;
+
+// ---------------------------------------------------------------------------
+// Webhooks
+// ---------------------------------------------------------------------------
+
+export const CreateWebhookRequest = z.object({
+  url: z
+    .url()
+    .refine((u) => u.startsWith('https://'), 'must be https')
+    .refine((u) => {
+      const host = new URL(u).hostname;
+      // No deliveries to loopback or private networks.
+      return !/^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|0\.|169\.254\.|\[?::1\]?$|\[?f[cd])/i.test(
+        host,
+      );
+    }, 'must be a public host'),
+  events: z.array(z.enum(['transfer.settled', 'deposit.confirmed', 'withdrawal.sent'])).min(1),
+});
+export type CreateWebhookRequest = z.infer<typeof CreateWebhookRequest>;
+
+export const VerifyWebhookRequest = z.object({
+  webhookId: z.uuid(),
+  payload: z.string().max(65536),
+  signature: z.string().max(1024),
+});
+export type VerifyWebhookRequest = z.infer<typeof VerifyWebhookRequest>;
