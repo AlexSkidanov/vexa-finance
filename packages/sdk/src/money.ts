@@ -28,6 +28,8 @@ import {
   configurePlan,
   depositPlan,
   findAta,
+  stakePlan,
+  unstakePlan,
   quoteFee,
   TOKEN_PROGRAM,
   transferPlan,
@@ -43,7 +45,7 @@ type Call = <T>(method: string, path: string, opts?: RequestOptions) => Promise<
 interface BalanceResponse {
   cusdcAccount: string;
   usdcAccount: string;
-  feeDiscount: { vexaAccount: string; discountBps: number } | null;
+  feeDiscount: { accounts: string[]; discountBps: number } | null;
   configured: boolean;
   confidential: {
     pendingBalanceLo: string;
@@ -98,6 +100,8 @@ function rentTable(ctx: ChainContext): RentTable {
     validityContext: BigInt(ctx.rent.validityContext),
     rangeU128Context: BigInt(ctx.rent.rangeU128Context),
     rangeU64Context: BigInt(ctx.rent.rangeU64Context),
+    stakeRecord: BigInt(ctx.rent.stakeRecord),
+    tokenAccount: BigInt(ctx.rent.tokenAccount),
   };
 }
 
@@ -121,6 +125,18 @@ export interface FeeQuote {
   net: bigint;
   /** The $VEXA discount applied, in basis points of the fee. */
   discountBps: number;
+}
+
+export interface TierInfo {
+  vexaMint: string | null;
+  /** $VEXA base units (6 decimals). */
+  staked: bigint;
+  held: bigint;
+  /** staked + held / 2 */
+  weight: bigint;
+  /** When staked $VEXA can be withdrawn. */
+  unlockAt: string | null;
+  tier: { level: number; discountBps: number; maxAgents: number; agentDailyLimit: bigint };
 }
 
 export class Money {
@@ -238,7 +254,7 @@ export class Money {
       ownerUsdc: address(raw.usdcAccount),
       ownerCusdc: address(raw.cusdcAccount),
       amount,
-      vexaAccount: raw.feeDiscount ? address(raw.feeDiscount.vexaAccount) : undefined,
+      discountAccounts: raw.feeDiscount?.accounts.map((a) => address(a)),
       expectedPendingBalanceCreditCounter:
         BigInt(raw.confidential.pendingBalanceCreditCounter) + 1n,
       // Deposit and apply in one go: available + everything pending + what lands.
@@ -360,7 +376,7 @@ export class Money {
       ownerCusdc: address(raw.cusdcAccount),
       destination,
       amount: input.amount,
-      vexaAccount: raw.feeDiscount ? address(raw.feeDiscount.vexaAccount) : undefined,
+      discountAccounts: raw.feeDiscount?.accounts.map((a) => address(a)),
       decimals: 6,
       proofs: buildWithdrawProofs({
         elgamal: keys.elgamal,
@@ -376,6 +392,64 @@ export class Money {
       idempotencyKey: true,
     });
     return { ...res, ...quote };
+  }
+
+  /** The user's $VEXA position and the tier it earns. */
+  async tier(): Promise<TierInfo> {
+    const t = await this.call<{
+      vexaMint: string | null;
+      staked: string;
+      held: string;
+      weight: string;
+      unlockAt: string | null;
+      tier: { level: number; discountBps: number; maxAgents: number; agentDailyLimit: string };
+    }>('GET', '/v1/tier');
+    return {
+      ...t,
+      staked: BigInt(t.staked),
+      held: BigInt(t.held),
+      weight: BigInt(t.weight),
+      tier: { ...t.tier, agentDailyLimit: BigInt(t.tier.agentDailyLimit) },
+    };
+  }
+
+  /**
+   * Stakes `amount` $VEXA (base units). Staked $VEXA counts twice as much as
+   * $VEXA in the wallet towards fee discounts and agent limits, and is locked
+   * for 7 days after each stake.
+   */
+  async stake(amount: bigint, keys: UserKeys): Promise<{ signatures: string[] }> {
+    const ctx = await this.chain();
+    const vexaMint = feeSchedule(ctx).vexaMint;
+    if (!vexaMint) throw new Error('$VEXA staking is not open yet');
+    const plan = await stakePlan({
+      vault: this.vault(ctx),
+      feePayer: address(ctx.feePayer),
+      owner: await createKeyPairSignerFromPrivateKeyBytes(keys.solanaSeed),
+      vexaMint,
+      amount,
+    });
+    return this.call('POST', '/v1/stake', {
+      body: { plan: await this.compile(plan, ctx) },
+      idempotencyKey: true,
+    });
+  }
+
+  /** Returns staked $VEXA to the wallet, once the 7-day lock has passed. */
+  async unstake(amount: bigint, keys: UserKeys): Promise<{ signatures: string[] }> {
+    const ctx = await this.chain();
+    const vexaMint = feeSchedule(ctx).vexaMint;
+    if (!vexaMint) throw new Error('$VEXA staking is not open yet');
+    const plan = await unstakePlan({
+      vault: this.vault(ctx),
+      owner: await createKeyPairSignerFromPrivateKeyBytes(keys.solanaSeed),
+      vexaMint,
+      amount,
+    });
+    return this.call('POST', '/v1/unstake', {
+      body: { plan: await this.compile(plan, ctx) },
+      idempotencyKey: true,
+    });
   }
 
   /** Activity with transfer amounts and memos decrypted on this device. */

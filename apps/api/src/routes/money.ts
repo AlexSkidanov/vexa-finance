@@ -17,7 +17,9 @@ import {
   PrepareTransferRequest,
   SubmitPlanRequest,
   SubmitTransferRequest,
+  tierFor,
   validateHandle,
+  vexaWeight,
   WithdrawRequest,
   type ChainContext,
 } from '@vexa/core';
@@ -25,8 +27,10 @@ import {
   decodeConfidentialAccount,
   decodeConfidentialMint,
   decodeFeeSchedule,
+  decodeStakeRecord,
   feeDiscountBps,
   findAta,
+  findStakeRecord,
   ProofType,
   TOKEN_2022_PROGRAM,
   TOKEN_PROGRAM,
@@ -73,19 +77,53 @@ async function feeSchedule(c: C) {
   return data ? decodeFeeSchedule(data) : null;
 }
 
-/** The discount a user's $VEXA (a classic SPL token account) earns them. */
+/**
+ * A user's $VEXA position: what's staked in the vault and what sits in their
+ * wallet, and the weight and tier they add up to. $VEXA balances are public
+ * token balances, not money movements, so returning them is fine.
+ */
+async function vexaPosition(c: C, wallet: Address, fees: Awaited<ReturnType<typeof feeSchedule>>) {
+  if (!fees?.vexaMint) return null;
+  const { chain, vault } = c.get('deps');
+  const [walletAccount, stakeRecord] = await Promise.all([
+    findAta(wallet, fees.vexaMint, TOKEN_PROGRAM),
+    findStakeRecord(wallet, vault.program),
+  ]);
+  const [walletData, stakeData] = await Promise.all([
+    chain.getAccountData(walletAccount),
+    chain.getAccountData(stakeRecord),
+  ]);
+  const held =
+    walletData && walletData.length >= 72
+      ? new DataView(walletData.buffer, walletData.byteOffset).getBigUint64(64, true)
+      : 0n;
+  const stake = stakeData ? decodeStakeRecord(stakeData) : null;
+  const staked = stake && stake.vexaMint === fees.vexaMint ? stake.amount : 0n;
+  const weight = vexaWeight(staked, held);
+  return {
+    vexaMint: fees.vexaMint,
+    walletAccount: walletData ? walletAccount : null,
+    stakeRecord: stake ? stakeRecord : null,
+    held,
+    staked,
+    unlockAt: stake?.unlockAt ?? null,
+    weight,
+    discountBps: feeDiscountBps(fees, weight),
+  };
+}
+
+/** The accounts to present to the vault for a fee discount, if any is earned. */
 async function vexaDiscount(
   c: C,
   wallet: Address,
   fees: Awaited<ReturnType<typeof feeSchedule>>,
-): Promise<{ vexaAccount: Address; discountBps: number } | null> {
-  if (!fees?.vexaMint || fees.tiers.length === 0) return null;
-  const vexaAccount = await findAta(wallet, fees.vexaMint, TOKEN_PROGRAM);
-  const data = await c.get('deps').chain.getAccountData(vexaAccount);
-  if (!data || data.length < 72) return null;
-  const balance = new DataView(data.buffer, data.byteOffset).getBigUint64(64, true);
-  const discountBps = feeDiscountBps(fees, balance);
-  return discountBps > 0 ? { vexaAccount, discountBps } : null;
+): Promise<{ accounts: Address[]; discountBps: number } | null> {
+  const position = await vexaPosition(c, wallet, fees);
+  if (!position || position.discountBps === 0) return null;
+  const accounts = [position.stakeRecord, position.walletAccount].filter(
+    (a): a is Address => a !== null,
+  );
+  return { accounts, discountBps: position.discountBps };
 }
 
 async function sponsorContext(
@@ -144,7 +182,7 @@ async function run(c: C, stages: CheckedTransaction[][]): Promise<string[]> {
 }
 
 /** Plans the API takes as-is, with no bookkeeping beyond the signatures. */
-function planRoute(kind: 'configure' | 'apply-pending') {
+function planRoute(kind: 'configure' | 'apply-pending' | 'stake' | 'unstake') {
   return async (c: C) => {
     const { plan } = await parseBody(c, SubmitPlanRequest);
     if (plan.kind !== kind)
@@ -154,6 +192,9 @@ function planRoute(kind: 'configure' | 'apply-pending') {
     if (kind === 'configure') {
       // Rent is only sponsored for an account that doesn't exist yet.
       extra.sponsorAccountRent = (await c.get('deps').chain.getAccountData(me.cusdc)) === null;
+    }
+    if (kind === 'stake' || kind === 'unstake') {
+      extra.stakeRecord = await findStakeRecord(me.wallet, c.get('deps').vault.program);
     }
     const signatures = await run(c, check(plan.stages, await sponsorContext(c, kind, me, extra)));
     return c.json({ signatures }, 201);
@@ -260,6 +301,31 @@ export const money = new Hono<AppBindings>()
 
   .post('/accounts/confidential', authenticate(), idempotent(), planRoute('configure'))
   .post('/balance/apply', authenticate(), idempotent(), planRoute('apply-pending'))
+
+  /**
+   * The user's $VEXA tier: staked and wallet $VEXA, the weight they add up to
+   * (staked in full, wallet at half), and what that tier unlocks.
+   */
+  .get('/tier', authenticate(), async (c) => {
+    const me = await owner(c);
+    const position = await vexaPosition(c, me.wallet, await feeSchedule(c));
+    const tier = tierFor(position?.weight ?? 0n);
+    return c.json({
+      vexaMint: position?.vexaMint ?? null,
+      staked: (position?.staked ?? 0n).toString(),
+      held: (position?.held ?? 0n).toString(),
+      weight: (position?.weight ?? 0n).toString(),
+      unlockAt: position?.unlockAt ? new Date(position.unlockAt * 1000).toISOString() : null,
+      tier: {
+        level: tier.level,
+        discountBps: tier.discountBps,
+        maxAgents: tier.maxAgents,
+        agentDailyLimit: tier.agentDailyLimit.toString(),
+      },
+    });
+  })
+  .post('/stake', authenticate(), idempotent(), planRoute('stake'))
+  .post('/unstake', authenticate(), idempotent(), planRoute('unstake'))
 
   .post('/deposits', authenticate(), idempotent(), async (c) => {
     const { store } = c.get('deps');

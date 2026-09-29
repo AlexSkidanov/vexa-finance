@@ -27,6 +27,7 @@ import {
 } from '@solana/kit';
 import {
   CONFIDENTIAL_ACCOUNT_SPACE,
+  STAKE_RECORD_LEN,
   contextStateSpace,
   ProofType,
   type RentTable,
@@ -79,6 +80,8 @@ export function rentSpaces() {
     validityContext: contextStateSpace(ProofType.VerifyBatchedGroupedCiphertext3HandlesValidity),
     rangeU128Context: contextStateSpace(ProofType.VerifyBatchedRangeProofU128),
     rangeU64Context: contextStateSpace(ProofType.VerifyBatchedRangeProofU64),
+    stakeRecord: BigInt(STAKE_RECORD_LEN),
+    tokenAccount: 165n,
   } satisfies Record<keyof RentTable, bigint>;
 }
 
