@@ -53,7 +53,7 @@ describe.skipIf(!vaultBinaryExists())(
 
     it('lets an auditor read a scoped, revocable history', async () => {
       const alice = await person('alice', 100n * USDC);
-      const bob = await person('bob', 0n);
+      await person('bob', 0n);
       await alice.vexa.money.deposit(100n * USDC, alice.wallet.keys);
       await alice.vexa.money.transfer(
         { to: '@bob', amount: 12_340_000n, memo: 'invoice 7, "Q3"' },
