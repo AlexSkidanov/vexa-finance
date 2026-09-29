@@ -3,7 +3,15 @@
  * programs/vault/src/processor/*.rs; data is a one-byte tag plus
  * little-endian arguments (programs/vault/src/instruction.rs).
  */
-import { AccountRole, type Address, type Instruction, type TransactionSigner } from '@solana/kit';
+import {
+  AccountRole,
+  getAddressDecoder,
+  getAddressEncoder,
+  getProgramDerivedAddress,
+  type Address,
+  type Instruction,
+  type TransactionSigner,
+} from '@solana/kit';
 import {
   ASSOCIATED_TOKEN_PROGRAM,
   INSTRUCTIONS_SYSVAR,
@@ -21,6 +29,8 @@ export const VaultInstruction = {
   SetPaused: 4,
   SetAdmin: 5,
   SetFees: 6,
+  Stake: 7,
+  Unstake: 8,
 } as const;
 
 export interface VaultAccounts {
@@ -38,9 +48,12 @@ export interface VaultAccounts {
 const ro = (address: Address) => ({ address, role: AccountRole.READONLY });
 const rw = (address: Address) => ({ address, role: AccountRole.WRITABLE });
 
-/** Trailing accounts of Deposit and Withdraw: schedule, treasury, optional $VEXA. */
-function feeAccounts(vault: VaultAccounts, vexaAccount?: Address) {
-  return [ro(vault.fees), rw(vault.treasury), ...(vexaAccount ? [ro(vexaAccount)] : [])];
+/**
+ * Trailing accounts of Deposit and Withdraw: the fee schedule, the treasury,
+ * then up to two discount accounts ($VEXA wallet account, stake record).
+ */
+function feeAccounts(vault: VaultAccounts, discountAccounts: Address[] = []) {
+  return [ro(vault.fees), rw(vault.treasury), ...discountAccounts.slice(0, 2).map(ro)];
 }
 
 function u64(amount: bigint): Uint8Array {
@@ -90,8 +103,8 @@ export function depositInstruction(input: {
   ownerCusdc: Address;
   /** USDC taken from the owner. The fee comes out of it; the rest is minted. */
   amount: bigint;
-  /** The owner's $VEXA account, for a fee discount. */
-  vexaAccount?: Address;
+  /** The owner's $VEXA token account and/or stake record, for a fee discount. */
+  discountAccounts?: Address[];
 }): Instruction {
   return {
     programAddress: input.vault.program ?? VAULT_PROGRAM,
@@ -105,7 +118,7 @@ export function depositInstruction(input: {
       rw(input.ownerCusdc),
       ro(TOKEN_PROGRAM),
       ro(TOKEN_2022_PROGRAM),
-      ...feeAccounts(input.vault, input.vexaAccount),
+      ...feeAccounts(input.vault, input.discountAccounts),
     ],
     data: new Uint8Array([VaultInstruction.Deposit, ...u64(input.amount)]),
   } as Instruction;
@@ -118,7 +131,7 @@ export function withdrawInstruction(input: {
   destination: Address;
   /** cUSDC burned. The destination receives it less the fee. */
   amount: bigint;
-  vexaAccount?: Address;
+  discountAccounts?: Address[];
 }): Instruction {
   return {
     programAddress: input.vault.program ?? VAULT_PROGRAM,
@@ -132,7 +145,7 @@ export function withdrawInstruction(input: {
       rw(input.destination),
       ro(TOKEN_PROGRAM),
       ro(TOKEN_2022_PROGRAM),
-      ...feeAccounts(input.vault, input.vexaAccount),
+      ...feeAccounts(input.vault, input.discountAccounts),
     ],
     data: new Uint8Array([VaultInstruction.Withdraw, ...u64(input.amount)]),
   } as Instruction;
@@ -161,4 +174,96 @@ export function setFeesInstruction(input: {
     ],
     data: new Uint8Array([VaultInstruction.SetFees, ...input.terms]),
   } as Instruction;
+}
+
+export async function findStakeRecord(
+  owner: Address,
+  vault: Address = VAULT_PROGRAM,
+): Promise<Address> {
+  const [pda] = await getProgramDerivedAddress({
+    programAddress: vault,
+    seeds: ['stake', getAddressEncoder().encode(owner)],
+  });
+  return pda;
+}
+
+/**
+ * Locks `amount` $VEXA in the vault. `payer` funds the stake record and the
+ * stake vault the first time (Vexa's fee payer, when sponsored).
+ */
+export function stakeInstruction(input: {
+  vault: VaultAccounts;
+  owner: TransactionSigner;
+  payer: TransactionSigner;
+  vexaMint: Address;
+  ownerVexa: Address;
+  stakeVault: Address;
+  stakeRecord: Address;
+  amount: bigint;
+}): Instruction {
+  return {
+    programAddress: input.vault.program ?? VAULT_PROGRAM,
+    accounts: [
+      { address: input.owner.address, role: AccountRole.READONLY_SIGNER, signer: input.owner },
+      { address: input.payer.address, role: AccountRole.WRITABLE_SIGNER, signer: input.payer },
+      ro(input.vault.config),
+      ro(input.vault.fees),
+      ro(input.vexaMint),
+      rw(input.ownerVexa),
+      rw(input.stakeVault),
+      rw(input.stakeRecord),
+      ro(TOKEN_PROGRAM),
+      ro(ASSOCIATED_TOKEN_PROGRAM),
+      ro(SYSTEM_PROGRAM),
+    ],
+    data: new Uint8Array([VaultInstruction.Stake, ...u64(input.amount)]),
+  } as Instruction;
+}
+
+/** Returns staked $VEXA to the owner's wallet once the lock has passed. */
+export function unstakeInstruction(input: {
+  vault: VaultAccounts;
+  owner: TransactionSigner;
+  vexaMint: Address;
+  ownerVexa: Address;
+  stakeVault: Address;
+  stakeRecord: Address;
+  amount: bigint;
+}): Instruction {
+  return {
+    programAddress: input.vault.program ?? VAULT_PROGRAM,
+    accounts: [
+      { address: input.owner.address, role: AccountRole.READONLY_SIGNER, signer: input.owner },
+      ro(input.vault.config),
+      ro(input.vexaMint),
+      rw(input.stakeVault),
+      rw(input.stakeRecord),
+      rw(input.ownerVexa),
+      ro(TOKEN_PROGRAM),
+    ],
+    data: new Uint8Array([VaultInstruction.Unstake, ...u64(input.amount)]),
+  } as Instruction;
+}
+
+export const STAKE_RECORD_LEN = 82;
+export const STAKE_LOCK_SECONDS = 7 * 24 * 60 * 60;
+
+export interface StakeRecord {
+  owner: Address;
+  vexaMint: Address;
+  amount: bigint;
+  /** Unix seconds after which the stake can be withdrawn. */
+  unlockAt: number;
+}
+
+export function decodeStakeRecord(data: Uint8Array): StakeRecord | null {
+  if (data.length !== STAKE_RECORD_LEN || data[0] !== 3) return null;
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const addresses = getAddressDecoder();
+  return {
+    owner: addresses.decode(data.subarray(2, 34)),
+    vexaMint: addresses.decode(data.subarray(34, 66)),
+    amount: view.getBigUint64(66, true),
+    unlockAt: Number(view.getBigInt64(74, true)),
+  };
 }

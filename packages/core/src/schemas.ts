@@ -146,7 +146,15 @@ export type CreatedApiKey = z.infer<typeof CreatedApiKey>;
 // ---------------------------------------------------------------------------
 
 export const CompiledPlanSchema = z.object({
-  kind: z.enum(['configure', 'deposit', 'apply-pending', 'transfer', 'withdraw']),
+  kind: z.enum([
+    'configure',
+    'deposit',
+    'apply-pending',
+    'transfer',
+    'withdraw',
+    'stake',
+    'unstake',
+  ]),
   stages: z
     .array(
       z
@@ -215,6 +223,8 @@ export const ChainContext = z.object({
     validityContext: z.string(),
     rangeU128Context: z.string(),
     rangeU64Context: z.string(),
+    stakeRecord: z.string(),
+    tokenAccount: z.string(),
   }),
   blockhash: z.string(),
   lastValidBlockHeight: z.string(),
