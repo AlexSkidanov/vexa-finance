@@ -335,4 +335,15 @@ describe.skipIf(!vaultBinaryExists())('money over HTTP, on LiteSVM', { timeout: 
     expect(res.status).toBe(400);
     expect((await res.json()).error.code).toBe('plan_refused');
   });
+
+  it('publishes the reserve and the cUSDC supply, which match', async () => {
+    const { resetTransparencyCache } = await import('../src/routes/transparency.js');
+    resetTransparencyCache();
+    const res = await api.app.request('/v1/transparency');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { reserve: string; supply: string; match: boolean };
+    expect(BigInt(body.reserve)).toBeGreaterThan(0n);
+    expect(body.reserve).toBe(body.supply);
+    expect(body.match).toBe(true);
+  });
 });

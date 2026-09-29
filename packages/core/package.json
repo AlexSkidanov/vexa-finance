@@ -25,6 +25,11 @@
       "types": "./dist/agent/index.d.ts",
       "import": "./dist/agent/index.js",
       "require": "./dist/agent/index.cjs"
+    },
+    "./view-keys": {
+      "types": "./dist/view-keys/index.d.ts",
+      "import": "./dist/view-keys/index.js",
+      "require": "./dist/view-keys/index.cjs"
     }
   },
   "files": [

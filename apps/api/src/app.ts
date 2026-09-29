@@ -1,3 +1,4 @@
+import { transparency } from './routes/transparency.js';
 import { audit, viewKeys } from './routes/view-keys.js';
 import { agents } from './routes/agents.js';
 import { Hono } from 'hono';
@@ -57,6 +58,7 @@ export function createApp(deps: Deps) {
   app.route('/v1/agents', agents);
   app.route('/v1/view-keys', viewKeys);
   app.route('/v1/audit', audit);
+  app.route('/v1/transparency', transparency);
   app.route('/v1', money);
 
   app.onError(onError);
