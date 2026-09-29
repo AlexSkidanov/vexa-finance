@@ -28,8 +28,8 @@ import { createKeyPairSignerFromBytes } from '@solana/kit';
 const WASM = join(ROOT, 'contracts/near-policy/target/near/vexa_near_policy.wasm');
 /** yoctoNEAR per byte of storage. */
 const STORAGE_BYTE_COST = 10n ** 19n;
-/** State for the contract config and the first agents, on top of the code. */
-const STATE_ALLOWANCE = NEAR / 10n;
+/** The account itself, contract state and the first agents, on top of the code. */
+const STATE_ALLOWANCE = (NEAR * 4n) / 10n;
 const near = (y: bigint) => (Number(y) / 1e24).toFixed(4);
 
 async function rpc<T>(url: string, method: string, params: unknown): Promise<T> {
@@ -120,6 +120,13 @@ async function main() {
     );
     if (value === false) throw new Error(`the registrar refused to create ${account}`);
     console.log(`Created ${account}`);
+  }
+
+  // Top up if the account can't cover its storage (it must before deploying).
+  const now = await view(account);
+  if (now && BigInt(now.amount) < storage) {
+    await deployerClient.transfer(account, storage - BigInt(now.amount));
+    console.log(`Topped up ${account} to ${near(storage)} NEAR`);
   }
 
   // 2. The code, deployed by the contract account itself.

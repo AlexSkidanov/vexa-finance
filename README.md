@@ -144,16 +144,16 @@ Card issuing and KYC ship as interfaces with mock implementations (`@vexa/core`)
 | Treasury (USDC account receiving fees)          | [`713NQALYzFN2zVSJ1ERqhSFiQTMqVnFyCVybYdn3r9Gj`](https://explorer.solana.com/address/713NQALYzFN2zVSJ1ERqhSFiQTMqVnFyCVybYdn3r9Gj) |
 | USDC mint (Circle)                              | [`EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`](https://explorer.solana.com/address/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v) |
 
-The deployed bytecode is `target/deploy/vault.so` v0.3.0, built from this repository with `pnpm build:vault` (SHA-256 `71fa037dac978628aca3339a464f65f12dc863047b2d51e9c64eaf97cd729826`). To compare, dump it with `solana program dump 3g2JPX4roASUJVacf68sBSpARk5m9B3hu9xeaE6mTjPR vault.so -um` and hash the first 43,984 bytes; the rest of the account is zero padding.
+The deployed bytecode is `target/deploy/vault.so` v0.5.0, built from this repository with `pnpm build:vault` (SHA-256 `e10142a4a5790485c036aa84ed510112537be4a24828c2c439bb1d59a88420b3`). To compare, dump it with `solana program dump 3g2JPX4roASUJVacf68sBSpARk5m9B3hu9xeaE6mTjPR vault.so -um` and hash the first 52,272 bytes; the rest of the account is zero padding.
 
 The reserve always holds at least as much USDC as the cUSDC supply; both are public and can be checked at any time.
 
 ### 🔗 NEAR mainnet
 
-| Component                     | Address                                                |
-| ----------------------------- | ------------------------------------------------------ |
-| MPC signer (chain signatures) | [`v1.signer`](https://nearblocks.io/address/v1.signer) |
-| Policy contract               | `vexa-policy.near` _(pending deploy)_                  |
+| Component                     | Address                                                              |
+| ----------------------------- | -------------------------------------------------------------------- |
+| MPC signer (chain signatures) | [`v1.signer`](https://nearblocks.io/address/v1.signer)               |
+| Policy contract               | [`vexa-policy.near`](https://nearblocks.io/address/vexa-policy.near) |
 
 ## Pre-requisites
 

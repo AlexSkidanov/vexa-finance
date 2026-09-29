@@ -39,6 +39,7 @@ export interface NearClient {
     opts?: { gas?: bigint; deposit?: bigint },
   ): Promise<NearCallResult<T>>;
   deploy(code: Uint8Array): Promise<string>;
+  transfer(receiverId: string, yocto: bigint): Promise<string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -87,9 +88,10 @@ class Writer {
 
 export type NearAction =
   | { functionCall: { method: string; args: Uint8Array; gas: bigint; deposit: bigint } }
-  | { deployContract: { code: Uint8Array } };
+  | { deployContract: { code: Uint8Array } }
+  | { transfer: { deposit: bigint } };
 
-/** borsh(Transaction). Action variants: 1 DeployContract, 2 FunctionCall. */
+/** borsh(Transaction). Action variants: 1 DeployContract, 2 FunctionCall, 3 Transfer. */
 export function encodeTransaction(tx: {
   signerId: string;
   publicKey: Uint8Array;
@@ -110,6 +112,8 @@ export function encodeTransaction(tx: {
     if ('functionCall' in action) {
       const f = action.functionCall;
       w.u8(2).string(f.method).vec(f.args).u64(f.gas).u128(f.deposit);
+    } else if ('transfer' in action) {
+      w.u8(3).u128(action.transfer.deposit);
     } else {
       w.u8(1).vec(action.deployContract.code);
     }
@@ -186,7 +190,9 @@ export function createNearClient(
   async function send(receiverId: string, actions: NearAction[]): Promise<Outcome> {
     const key = await rpc<{ nonce: number | string; block_hash: string }>(opts, 'query', {
       request_type: 'view_access_key',
-      finality: 'final',
+      // The latest nonce, not the final one: a transaction sent a moment ago
+      // may not be final yet, and reusing its nonce is rejected.
+      finality: 'optimistic',
       account_id: opts.accountId,
       public_key: publicKeyString,
     });
@@ -201,7 +207,10 @@ export function createNearClient(
     const signed = base64Encode(signTransaction(encoded, seed));
     const hash = base58Encode(sha256(encoded));
     try {
-      return await rpc<Outcome>(opts, 'send_tx', { signed_tx_base64: signed, wait_until: 'FINAL' });
+      return await rpc<Outcome>(opts, 'send_tx', {
+        signed_tx_base64: signed,
+        wait_until: 'EXECUTED_OPTIMISTIC',
+      });
     } catch (e) {
       // A call that waits on the MPC network can outlast the RPC's own
       // timeout. The transaction is in; keep asking for its final outcome.
@@ -212,7 +221,7 @@ export function createNearClient(
           return await rpc<Outcome>(opts, 'tx', {
             tx_hash: hash,
             sender_account_id: opts.accountId,
-            wait_until: 'FINAL',
+            wait_until: 'EXECUTED_OPTIMISTIC',
           });
         } catch (again) {
           if (!(again instanceof NearError) || !/TIMEOUT|UNKNOWN_TRANSACTION/i.test(again.message))
@@ -255,6 +264,11 @@ export function createNearClient(
         },
       ]);
       return parseOutcome<T>(outcome);
+    },
+
+    async transfer(receiverId: string, yocto: bigint) {
+      const outcome = await send(receiverId, [{ transfer: { deposit: yocto } }]);
+      return parseOutcome(outcome).txHash;
     },
 
     async deploy(code: Uint8Array) {
