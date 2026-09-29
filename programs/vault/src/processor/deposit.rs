@@ -10,23 +10,29 @@
 //!   6. `[writable]` owner's cUSDC token account (configured for confidential transfers)
 //!   7. `[]`         Token program
 //!   8. `[]`         Token-2022 program
+//!   9. `[]`         fee schedule PDA `["fees"]`
+//!  10. `[writable]` treasury USDC account, as recorded in the fee schedule
+//!  11. `[]`         optional: owner's $VEXA token account, for a fee discount
 //!
-//! Data: `amount: u64`.
+//! Data: `amount: u64`, the USDC taken from the owner. The fee comes out of
+//! it; the rest is minted as cUSDC.
 
 use pinocchio::{cpi::Signer, error::ProgramError, AccountView, ProgramResult};
 
 use super::{
     config_seeds, require_config_match, require_program, require_signer, require_token_account,
+    vexa_balance,
 };
 use crate::{
     error::VaultError,
+    fees::FeeSchedule,
     instruction::parse_amount,
     state::Config,
     token::{self, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID},
 };
 
 pub fn process(accounts: &mut [AccountView], args: &[u8]) -> ProgramResult {
-    let [owner, config, usdc_mint, cusdc_mint, owner_usdc, usdc_reserve, owner_cusdc, token_program, token_2022_program, ..] =
+    let [owner, config, usdc_mint, cusdc_mint, owner_usdc, usdc_reserve, owner_cusdc, token_program, token_2022_program, fees, treasury, rest @ ..] =
         accounts
     else {
         return Err(ProgramError::NotEnoughAccountKeys);
@@ -56,16 +62,34 @@ pub fn process(accounts: &mut [AccountView], args: &[u8]) -> ProgramResult {
         Some(owner.address()),
     )?;
 
+    let schedule = FeeSchedule::load(fees)?;
+    require_config_match(treasury, &schedule.treasury())?;
+    let fee =
+        schedule.fee(amount, vexa_balance(rest.first(), &schedule.vexa_mint(), owner.address())?);
+    let net = amount.checked_sub(fee).filter(|n| *n > 0).ok_or(VaultError::AmountBelowFee)?;
+
     let decimals = token::read_mint(&usdc_mint.try_borrow()?)?.decimals;
 
-    // 1. USDC in.
+    // 1. USDC in: the fee to the treasury, the rest to the reserve.
+    if fee > 0 {
+        token::transfer_checked(
+            &TOKEN_PROGRAM_ID,
+            owner_usdc,
+            usdc_mint,
+            treasury,
+            owner,
+            fee,
+            decimals,
+            &[],
+        )?;
+    }
     token::transfer_checked(
         &TOKEN_PROGRAM_ID,
         owner_usdc,
         usdc_mint,
         usdc_reserve,
         owner,
-        amount,
+        net,
         decimals,
         &[],
     )?;
@@ -77,12 +101,12 @@ pub fn process(accounts: &mut [AccountView], args: &[u8]) -> ProgramResult {
         cusdc_mint,
         owner_cusdc,
         config,
-        amount,
+        net,
         decimals,
         &[Signer::from(&seeds)],
     )?;
 
     // 3. Straight into the pending confidential balance, so it never lingers
     //    in the account's public balance.
-    token::confidential_deposit(owner_cusdc, cusdc_mint, owner, amount, decimals)
+    token::confidential_deposit(owner_cusdc, cusdc_mint, owner, net, decimals)
 }

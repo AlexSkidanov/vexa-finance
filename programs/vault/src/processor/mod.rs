@@ -4,9 +4,18 @@ pub mod deposit;
 pub mod initialize;
 pub mod withdraw;
 
-use pinocchio::{cpi::Seed, error::ProgramError, AccountView, Address};
+use pinocchio::{
+    cpi::{Seed, Signer},
+    error::ProgramError,
+    sysvars::{rent::Rent, Sysvar},
+    AccountView, Address, ProgramResult,
+};
+use pinocchio_system::instructions::{Allocate, Assign, CreateAccount, Transfer};
 
-use crate::{error::VaultError, state::CONFIG_SEED};
+use crate::{
+    error::VaultError, state::CONFIG_SEED, token::TOKEN_2022_PROGRAM_ID, token::TOKEN_PROGRAM_ID,
+    ID,
+};
 
 // Account checks a framework would generate, written out. Every processor starts
 // with these.
@@ -73,4 +82,53 @@ pub(crate) fn require_token_account(
 /// Seeds for the config PDA to sign CPIs.
 pub(crate) fn config_seeds(bump: &[u8; 1]) -> [Seed<'_>; 2] {
     [Seed::from(CONFIG_SEED), Seed::from(bump)]
+}
+
+/// Creates a PDA owned by this program. If someone has already sent lamports
+/// to the address (which would make CreateAccount fail and block setup
+/// forever), tops it up and allocates and assigns it instead.
+pub(crate) fn create_pda_account(
+    payer: &AccountView,
+    account: &AccountView,
+    space: usize,
+    signer: &Signer,
+) -> ProgramResult {
+    let rent = Rent::get()?.try_minimum_balance(space)?;
+    let signers = core::slice::from_ref(signer);
+
+    if account.lamports() == 0 {
+        return CreateAccount {
+            from: payer,
+            to: account,
+            lamports: rent,
+            space: space as u64,
+            owner: &ID,
+        }
+        .invoke_signed(signers);
+    }
+
+    let shortfall = rent.saturating_sub(account.lamports());
+    if shortfall > 0 {
+        Transfer { from: payer, to: account, lamports: shortfall }.invoke()?;
+    }
+    Allocate { account, space: space as u64 }.invoke_signed(signers)?;
+    Assign { account, owner: &ID }.invoke_signed(signers)
+}
+
+/// The owner's $VEXA balance, read from an optional account that must be
+/// theirs and of the configured mint. No account, or no $VEXA mint set,
+/// means a balance of zero: discounts are opt-in, never a way to fail.
+pub(crate) fn vexa_balance(
+    account: Option<&AccountView>,
+    vexa_mint: &Address,
+    owner: &Address,
+) -> Result<u64, ProgramError> {
+    let Some(account) = account else { return Ok(0) };
+    if vexa_mint == &Address::default() {
+        return Ok(0);
+    }
+    let program =
+        if account.owned_by(&TOKEN_PROGRAM_ID) { TOKEN_PROGRAM_ID } else { TOKEN_2022_PROGRAM_ID };
+    require_token_account(account, &program, vexa_mint, Some(owner))?;
+    crate::token::read_token_amount(&account.try_borrow()?)
 }

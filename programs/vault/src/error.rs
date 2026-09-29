@@ -37,6 +37,12 @@ pub enum VaultError {
     NotAdmin = 14,
     /// The vault config is already initialized.
     AlreadyInitialized = 15,
+    /// The fee schedule has not been set.
+    FeesNotSet = 16,
+    /// The fee schedule breaks a rule: fee above the ceiling, or tiers out of order.
+    InvalidFeeSchedule = 17,
+    /// The amount doesn't cover the fee.
+    AmountBelowFee = 18,
 }
 
 impl From<VaultError> for ProgramError {

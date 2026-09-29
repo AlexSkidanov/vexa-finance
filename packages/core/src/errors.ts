@@ -10,6 +10,10 @@ export const ErrorCode = {
   InvalidSignature: 'invalid_signature',
   IdempotencyKeyMissing: 'idempotency_key_missing',
   IdempotencyKeyInvalid: 'idempotency_key_invalid',
+  /** A submitted transaction plan broke the sponsorship policy. */
+  PlanRefused: 'plan_refused',
+  /** The user hasn't claimed a handle and registered keys yet. */
+  ProfileIncomplete: 'profile_incomplete',
   // 401 / 403
   Unauthenticated: 'unauthenticated',
   InvalidApiKey: 'invalid_api_key',
@@ -19,6 +23,8 @@ export const ErrorCode = {
   NotFound: 'not_found',
   // 409
   HandleTaken: 'handle_taken',
+  RecipientNotReady: 'recipient_not_ready',
+  TransferAlreadySubmitted: 'transfer_already_submitted',
   HandleAlreadyClaimed: 'handle_already_claimed',
   PubkeyInUse: 'pubkey_in_use',
   IdempotencyRequestInProgress: 'idempotency_request_in_progress',
@@ -28,6 +34,8 @@ export const ErrorCode = {
   RateLimited: 'rate_limited',
   Internal: 'internal_error',
   UpstreamUnavailable: 'upstream_unavailable',
+  /** A transaction failed on-chain or in simulation. */
+  ChainFailure: 'chain_error',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

@@ -12,6 +12,9 @@ import { auth } from './routes/auth.js';
 import { handles } from './routes/handles.js';
 import { health } from './routes/health.js';
 import { me } from './routes/me.js';
+import { money } from './routes/money.js';
+import { webhooks } from './routes/webhooks.js';
+import { hooks } from './routes/hooks.js';
 
 /**
  * Builds the Hono app from its dependencies. Kept separate from the server
@@ -32,21 +35,24 @@ export function createApp(deps: Deps) {
       maxAge: 600,
     }),
   );
-  app.use(
-    '*',
-    bodyLimit({
-      maxSize: 64 * 1024,
-      onError: () => {
-        throw new ApiError(413, ErrorCode.InvalidRequest, 'Request body is too large');
-      },
-    }),
-  );
+  // Provider webhooks can batch many transactions; everything else is small.
+  const tooLarge = () => {
+    throw new ApiError(413, ErrorCode.InvalidRequest, 'Request body is too large');
+  };
+  app.use('/v1/hooks/*', bodyLimit({ maxSize: 2 * 1024 * 1024, onError: tooLarge }));
+  app.use('*', async (c, next) => {
+    if (c.req.path.startsWith('/v1/hooks/')) return next();
+    return bodyLimit({ maxSize: 64 * 1024, onError: tooLarge })(c, next);
+  });
 
   app.route('/health', health);
   app.route('/v1/auth', auth);
   app.route('/v1/me', me);
   app.route('/v1/handles', handles);
   app.route('/v1/api-keys', apiKeys);
+  app.route('/v1/webhooks', webhooks);
+  app.route('/v1/hooks', hooks);
+  app.route('/v1', money);
 
   app.onError(onError);
   app.notFound(onNotFound);

@@ -11,6 +11,8 @@
  */
 import {
   apiKeyEnvironment,
+  type WebhookEventType,
+  type WebhookVerification,
   handleClaimMessage,
   normalizeHandle,
   type ApiEnvironment,
@@ -22,8 +24,19 @@ import {
 } from '@vexa/core';
 import { request, VexaError, type HttpOptions, type RequestOptions } from './http.js';
 import { createPasskey, getPasskeyAssertion } from './passkeys.js';
+import { Money } from './money.js';
 
 export { VexaError };
+/** Verify webhook deliveries locally: `verifyWebhookSignature({ payload, header, secret })`. */
+export {
+  signWebhookPayload,
+  verifyWebhookSignature,
+  WEBHOOK_EVENT_ID_HEADER,
+  WEBHOOK_SIGNATURE_HEADER,
+  type WebhookEventType,
+  type WebhookVerification,
+} from '@vexa/core';
+export type { ActivityMovement, ActivityTransfer, Balance, FeeQuote } from './money.js';
 export type { ApiKeySummary, CreatedApiKey, HandleResolution, Profile, Session };
 
 export const DEFAULT_BASE_URLS: Record<ApiEnvironment, string> = {
@@ -193,6 +206,31 @@ export class Vexa {
     list: async () => (await this.call<{ data: ApiKeySummary[] }>('GET', '/v1/api-keys')).data,
     revoke: (id: string) => this.call<void>('DELETE', `/v1/api-keys/${encodeURIComponent(id)}`),
   };
+
+  readonly webhooks = {
+    /** The returned `secret` is shown once; store it to verify deliveries. */
+    create: (url: string, events: WebhookEventType[], opts: { idempotencyKey?: string } = {}) =>
+      this.call<{ id: string; url: string; events: string[]; createdAt: string; secret?: string }>(
+        'POST',
+        '/v1/webhooks',
+        { body: { url, events }, idempotencyKey: opts.idempotencyKey ?? true },
+      ),
+    list: async () =>
+      (
+        await this.call<{
+          data: { id: string; url: string; events: string[]; createdAt: string }[];
+        }>('GET', '/v1/webhooks')
+      ).data,
+    remove: (id: string) => this.call<void>('DELETE', `/v1/webhooks/${encodeURIComponent(id)}`),
+    /** Asks the API to check a signature with the stored secret. Prefer verifying locally. */
+    verify: (webhookId: string, payload: string, signature: string) =>
+      this.call<WebhookVerification>('POST', '/v1/webhooks/verify', {
+        body: { webhookId, payload, signature },
+      }),
+  };
+
+  /** Deposits, confidential transfers, withdrawals, balances and activity. */
+  readonly money: Money = new Money((method, path, opts) => this.call(method, path, opts));
 
   me(): Promise<Profile> {
     return this.call<Profile>('GET', '/v1/me');
