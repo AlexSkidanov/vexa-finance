@@ -5,6 +5,7 @@ import {
   type EventRow,
   type MovementRow,
   type TransferRow,
+  type WebhookRow,
   type ApiKeyRow,
   type HandleRecord,
   type IdempotencyBegin,
@@ -75,6 +76,16 @@ export function createPostgresStore(url: string): Store & { close(): Promise<voi
     txSig: r.tx_sig,
     status: r.status,
     ...(r.destination ? { destination: r.destination } : {}),
+    createdAt: r.created_at,
+  });
+
+  const toWebhook = (r: postgres.Row): WebhookRow => ({
+    id: r.id,
+    ownerId: r.owner_id,
+    url: r.url,
+    events: r.events,
+    active: r.active,
+    secretEncrypted: new Uint8Array(r.secret_encrypted),
     createdAt: r.created_at,
   });
 
@@ -326,17 +337,95 @@ export function createPostgresStore(url: string): Store & { close(): Promise<voi
 
     events: {
       async emit(ownerId, type, data) {
+        return sql.begin(async (tx) => {
+          const [row] = await tx`
+            insert into public.events (owner_id, type, data)
+            values (${ownerId}, ${type}, ${tx.json(data as postgres.JSONValue)})
+            returning *`;
+          const event: EventRow = {
+            id: row!.id,
+            ownerId: row!.owner_id,
+            type: row!.type,
+            data: row!.data,
+            createdAt: row!.created_at,
+          };
+          const payload = {
+            id: event.id,
+            type: event.type,
+            createdAt: event.createdAt.toISOString(),
+            data: event.data,
+          };
+          await tx`
+            insert into public.webhook_deliveries (webhook_id, event_id, event_type, payload)
+            select id, ${event.id}, ${type}, ${tx.json(payload as postgres.JSONValue)}
+            from public.webhooks
+            where owner_id = ${ownerId} and active and ${type} = any(events)`;
+          return event;
+        }) as Promise<EventRow>;
+      },
+    },
+
+    webhooks: {
+      async create({ ownerId, url, events, secretEncrypted }) {
         const [row] = await sql`
-          insert into public.events (owner_id, type, data)
-          values (${ownerId}, ${type}, ${sql.json(data as postgres.JSONValue)})
+          insert into public.webhooks (owner_id, url, events, secret_encrypted)
+          values (${ownerId}, ${url}, ${events}, ${Buffer.from(secretEncrypted)})
           returning *`;
-        return {
-          id: row!.id,
-          ownerId: row!.owner_id,
-          type: row!.type,
-          data: row!.data,
-          createdAt: row!.created_at,
-        } satisfies EventRow;
+        return toWebhook(row!);
+      },
+      async list(ownerId) {
+        const rows = await sql`
+          select * from public.webhooks where owner_id = ${ownerId} and active order by created_at desc`;
+        return rows.map(toWebhook);
+      },
+      async get(ownerId, id) {
+        const [row] = await sql`
+          select * from public.webhooks where owner_id = ${ownerId} and id = ${id} and active`;
+        return row ? toWebhook(row) : null;
+      },
+      async remove(ownerId, id) {
+        const rows = await sql`
+          update public.webhooks set active = false
+          where owner_id = ${ownerId} and id = ${id} and active returning id`;
+        return rows.length > 0;
+      },
+      async claimDue(limit, leaseSeconds) {
+        const rows = await sql`
+          with due as (
+            select d.id from public.webhook_deliveries d
+            join public.webhooks w on w.id = d.webhook_id
+            where d.status = 'pending' and d.next_attempt_at <= now() and w.active
+            order by d.next_attempt_at
+            limit ${limit}
+            for update of d skip locked
+          )
+          update public.webhook_deliveries d
+          set next_attempt_at = now() + make_interval(secs => ${leaseSeconds}), attempt = d.attempt + 1
+          from due, public.webhooks w
+          where d.id = due.id and w.id = d.webhook_id
+          returning d.id, d.attempt, d.event_id, d.event_type, d.payload, w.url, w.secret_encrypted`;
+        return rows.map((r) => ({
+          id: r.id,
+          attempt: r.attempt,
+          eventId: r.event_id,
+          eventType: r.event_type,
+          payload: r.payload,
+          url: r.url,
+          secretEncrypted: new Uint8Array(r.secret_encrypted),
+        }));
+      },
+      async markDelivered(id, responseStatus) {
+        await sql`
+          update public.webhook_deliveries
+          set status = 'delivered', response_status = ${responseStatus}, delivered_at = now()
+          where id = ${id}`;
+      },
+      async markFailed(id, responseStatus, nextAttemptAt) {
+        await sql`
+          update public.webhook_deliveries
+          set status = ${nextAttemptAt ? 'pending' : 'dead'}, response_status = ${responseStatus},
+              next_attempt_at = coalesce(${nextAttemptAt}, next_attempt_at)
+          where id = ${id}`;
       },
     },
 

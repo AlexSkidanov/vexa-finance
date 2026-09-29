@@ -100,6 +100,27 @@ export interface EventRow {
   createdAt: Date;
 }
 
+export interface WebhookRow {
+  id: string;
+  ownerId: string;
+  url: string;
+  events: string[];
+  active: boolean;
+  /** Per-endpoint signing secret, encrypted with WEBHOOK_SIGNING_SECRET. */
+  secretEncrypted: Uint8Array;
+  createdAt: Date;
+}
+
+export interface DueDelivery {
+  id: string;
+  attempt: number;
+  eventId: string;
+  eventType: string;
+  payload: Record<string, unknown>;
+  url: string;
+  secretEncrypted: Uint8Array;
+}
+
 export interface Store {
   profiles: {
     get(userId: string): Promise<ProfileRow | null>;
@@ -200,7 +221,32 @@ export interface Store {
   };
 
   events: {
+    /** Records an event and queues a delivery for each subscribed, active webhook. */
     emit(ownerId: string, type: string, data: Record<string, unknown>): Promise<EventRow>;
+  };
+
+  webhooks: {
+    create(input: {
+      ownerId: string;
+      url: string;
+      events: string[];
+      secretEncrypted: Uint8Array;
+    }): Promise<WebhookRow>;
+    list(ownerId: string): Promise<WebhookRow[]>;
+    get(ownerId: string, id: string): Promise<WebhookRow | null>;
+    remove(ownerId: string, id: string): Promise<boolean>;
+    /**
+     * Claims up to `limit` due deliveries. Claimed rows are pushed back by a
+     * lease, so a worker that dies mid-delivery doesn't lose them.
+     */
+    claimDue(limit: number, leaseSeconds: number): Promise<DueDelivery[]>;
+    markDelivered(id: string, responseStatus: number): Promise<void>;
+    /** Schedules a retry, or parks the delivery as dead when `nextAttemptAt` is null. */
+    markFailed(
+      id: string,
+      responseStatus: number | null,
+      nextAttemptAt: Date | null,
+    ): Promise<void>;
   };
 
   ping(): Promise<void>;

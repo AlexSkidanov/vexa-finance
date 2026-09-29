@@ -4,7 +4,9 @@ import {
   type ActivityItem,
   type EventRow,
   type MovementRow,
+  type DueDelivery,
   type TransferRow,
+  type WebhookRow,
   type ApiKeyRow,
   type PasskeyRow,
   type ProfileRow,
@@ -36,6 +38,16 @@ export function createMemoryStore(): Store {
   const deposits: MovementRow[] = [];
   const withdrawals: MovementRow[] = [];
   const events: EventRow[] = [];
+  const hooks = new Map<string, WebhookRow>();
+  const deliveries = new Map<
+    string,
+    Omit<DueDelivery, 'url' | 'secretEncrypted'> & {
+      webhookId: string;
+      status: 'pending' | 'delivered' | 'dead';
+      nextAttemptAt: number;
+      responseStatus: number | null;
+    }
+  >();
 
   const profile = (userId: string): ProfileRow =>
     profiles.get(userId) ?? {
@@ -258,7 +270,78 @@ export function createMemoryStore(): Store {
       async emit(ownerId, type, data) {
         const row: EventRow = { id: randomUUID(), ownerId, type, data, createdAt: new Date() };
         events.push(row);
+        for (const w of hooks.values()) {
+          if (w.ownerId !== ownerId || !w.active || !w.events.includes(type)) continue;
+          const id = randomUUID();
+          deliveries.set(id, {
+            id,
+            webhookId: w.id,
+            attempt: 0,
+            eventId: row.id,
+            eventType: type,
+            payload: { id: row.id, type, createdAt: row.createdAt.toISOString(), data },
+            status: 'pending',
+            nextAttemptAt: Date.now(),
+            responseStatus: null,
+          });
+        }
         return row;
+      },
+    },
+
+    webhooks: {
+      async create({ ownerId, url, events: types, secretEncrypted }) {
+        const row: WebhookRow = {
+          id: randomUUID(),
+          ownerId,
+          url,
+          events: types,
+          active: true,
+          secretEncrypted,
+          createdAt: new Date(),
+        };
+        hooks.set(row.id, row);
+        return row;
+      },
+      async list(ownerId) {
+        return [...hooks.values()].filter((w) => w.ownerId === ownerId && w.active);
+      },
+      async get(ownerId, id) {
+        const w = hooks.get(id);
+        return w && w.ownerId === ownerId && w.active ? w : null;
+      },
+      async remove(ownerId, id) {
+        const w = hooks.get(id);
+        if (!w || w.ownerId !== ownerId || !w.active) return false;
+        w.active = false;
+        return true;
+      },
+      async claimDue(limit, leaseSeconds) {
+        const now = Date.now();
+        const due = [...deliveries.values()]
+          .filter(
+            (d) =>
+              d.status === 'pending' && d.nextAttemptAt <= now && hooks.get(d.webhookId)?.active,
+          )
+          .slice(0, limit);
+        return due.map((d) => {
+          d.attempt += 1;
+          d.nextAttemptAt = now + leaseSeconds * 1000;
+          const w = hooks.get(d.webhookId)!;
+          const { webhookId: _w, status: _s, nextAttemptAt: _n, responseStatus: _r, ...rest } = d;
+          return { ...rest, url: w.url, secretEncrypted: w.secretEncrypted };
+        });
+      },
+      async markDelivered(id, responseStatus) {
+        const d = deliveries.get(id);
+        if (d) Object.assign(d, { status: 'delivered', responseStatus });
+      },
+      async markFailed(id, responseStatus, nextAttemptAt) {
+        const d = deliveries.get(id);
+        if (!d) return;
+        d.responseStatus = responseStatus;
+        if (nextAttemptAt) d.nextAttemptAt = nextAttemptAt.getTime();
+        else d.status = 'dead';
       },
     },
 

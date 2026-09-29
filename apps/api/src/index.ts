@@ -6,6 +6,7 @@ import { createSupabaseAuthProvider } from './lib/auth-provider.js';
 import { createSupabaseTokenVerifier } from './lib/tokens.js';
 import { createPostgresStore } from './store/postgres.js';
 import { createRpcChain } from './chain/chain.js';
+import { startWebhookWorker } from './workers/webhooks.js';
 import { address } from '@solana/kit';
 import { findAta, findVaultConfig, TOKEN_PROGRAM } from '@vexa/core/solana';
 
@@ -46,6 +47,12 @@ const app = createApp({
   }),
 });
 
+const stopWebhookWorker = startWebhookWorker({
+  store,
+  logger: logger.child({ worker: 'webhooks' }),
+  masterSecret: env.WEBHOOK_SIGNING_SECRET,
+});
+
 const server = serve({ fetch: app.fetch, port: env.PORT }, (info) => {
   logger.info(
     { port: info.port, cluster: env.SOLANA_CLUSTER, environment: env.API_ENVIRONMENT },
@@ -61,6 +68,7 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     if (shuttingDown) return;
     shuttingDown = true;
     logger.info({ signal }, 'shutting down');
+    stopWebhookWorker();
     server.close(async () => {
       await store.close();
       process.exit(0);
