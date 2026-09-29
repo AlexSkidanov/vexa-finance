@@ -309,7 +309,15 @@ What a device needs to build plans.
     "config": "7Q3LNA4P3J7H4zNdHJEephe2XEvBPKPUJsqGifexRopw",
     "usdcMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "cusdcMint": "4STXpFN2mQSt12XG4os7ftLXHbBq5PVWYCAahToRt6QQ",
-    "usdcReserve": "8eeishQYvtHwwM8QRN9629zzU9hBn18dGFW5T75ytqz6"
+    "usdcReserve": "8eeishQYvtHwwM8QRN9629zzU9hBn18dGFW5T75ytqz6",
+    "fees": "4PAtQdQRVfozc2F8x4eJF1oHhAQ6EMfX5EqBgPGnj29u"
+  },
+  "feeSchedule": {
+    "feeBps": 10,
+    "feeCap": "5000000",
+    "treasury": "713NQALYzFN2zVSJ1ERqhSFiQTMqVnFyCVybYdn3r9Gj",
+    "vexaMint": null,
+    "tiers": []
   },
   "auditorElgamalPubkey": null,
   "rent": {
@@ -324,14 +332,31 @@ What a device needs to build plans.
 }
 ```
 
+`feeSchedule` is what the vault charges on deposits and withdrawals (see [Fees](#fees)). It's `null` until the vault admin sets one; until then the vault refuses to move money.
+
+### Fees
+
+Vexa charges **0.10% of each deposit and withdrawal, capped at 5 USDC**. Transfers between Vexa users are free. The fee is charged by the vault program itself, in USDC, straight to the treasury, so it applies however the transaction was built and never passes through the reserve that backs cUSDC.
+
+Deposits and withdrawals are the only places an amount is public, which is why the fee lives there: charging it on a confidential transfer would need another proof and would reveal a bound on the amount.
+
+- **Deposit** `amount`: the fee comes out of it; `amount − fee` lands in the confidential balance.
+- **Withdrawal** `amount`: `amount` leaves the confidential balance; the destination receives `amount − fee`.
+- The fee is `min(⌈amount × feeBps / 10 000⌉, feeCap)`, rounded up, so every movement pays at least one base unit. An amount that doesn't cover its own fee is refused.
+- Holding $VEXA earns a discount off the fee, by tier (live once $VEXA launches in Phase 3). The device passes its $VEXA account to the vault, which reads the balance itself.
+- The program refuses any rate above **1%**, whoever holds the admin key.
+
+`vexa.money.quote(amount)` returns `{ fee, net, discountBps }` with the vault's exact arithmetic; `deposit()` and `withdraw()` return the same fields.
+
 ### `GET /v1/balance`
 
-The user's cUSDC balance **as ciphertexts**. Decrypt on the device: the AE key reads `decryptableAvailableBalance`, the ElGamal key reads the pending halves.
+The user's cUSDC balance **as ciphertexts**. Decrypt on the device: the AE key reads `decryptableAvailableBalance`, the ElGamal key reads the pending halves. `feeDiscount` is the $VEXA fee tier the user qualifies for, if any: the account to present to the vault and its discount, never the balance.
 
 ```json
 {
   "cusdcAccount": "…",
   "usdcAccount": "…",
+  "feeDiscount": null,
   "configured": true,
   "confidential": {
     "pendingBalanceLo": "<base64>",
@@ -350,7 +375,7 @@ The user's cUSDC balance **as ciphertexts**. Decrypt on the device: the AE key r
 
 ### `POST /v1/deposits`
 
-**Idempotent.** `{ "plan": { "kind": "deposit", … } }`. USDC from the user's wallet into the vault; the cUSDC lands in the confidential balance and is applied in the same transaction. Deposits are public on-chain, like any USDC transfer; the API still doesn't record the amount. Emits `deposit.confirmed`.
+**Idempotent.** `{ "plan": { "kind": "deposit", … } }`. USDC from the user's wallet into the vault, less the [fee](#fees); the cUSDC lands in the confidential balance and is applied in the same transaction. Deposits are public on-chain, like any USDC transfer; the API still doesn't record the amount. Emits `deposit.confirmed`.
 
 ```json
 { "id": "…", "status": "confirmed", "txSig": "…" }
@@ -404,7 +429,7 @@ Before sending, the API reads the grouped ciphertexts from the plan's validity p
 { "plan": { "kind": "withdraw", … }, "destinationAccount": "<an existing USDC token account>" }
 ```
 
-The destination must already be a USDC token account (a wallet's USDC account, an exchange deposit address). Creating one costs permanent rent, which Vexa doesn't sponsor. Emits `withdrawal.sent`.
+The destination receives the amount less the [fee](#fees). It must already be a USDC token account (a wallet's USDC account, an exchange deposit address): creating one costs permanent rent, which Vexa doesn't sponsor. Emits `withdrawal.sent`.
 
 ### `GET /v1/activity?limit=50&before=<ISO timestamp>`
 

@@ -244,6 +244,20 @@ solana program set-upgrade-authority <VAULT_PROGRAM_ID> \
 
 The upgrade authority can replace the program's code, so it's the most sensitive key in the system. Keep it offline; the admin key only needs to pause the vault and manage the mint's confidential-transfer settings.
 
+### Upgrading and setting fees
+
+```bash
+pnpm build:vault
+pnpm upgrade:vault --authority ~/.config/vexa/upgrade-authority.json            # dry run
+pnpm upgrade:vault --authority ~/.config/vexa/upgrade-authority.json --execute
+pnpm vault:set-fees --bps 10 --cap 5                                             # dry run
+pnpm vault:set-fees --bps 10 --cap 5 --execute
+```
+
+An upgrade uploads the new binary to a buffer first. The buffer's rent is needed up front and refunded when the upgrade lands; if the binary grew, extending the program account costs rent permanently. The dry run prints both from live prices. Pass `--payer <keypair>` to fund it from a key other than the upgrade authority. Afterwards the script compares the on-chain bytecode hash with the local build.
+
+`vault:set-fees` is signed by the admin key. It creates the treasury's USDC account (owned by `TREASURY_OWNER_PUBKEY`) if needed and writes the schedule. The vault refuses deposits and withdrawals until a schedule exists, so run it right after the first deploy or the upgrade that introduced fees.
+
 The program keypair lives at `target/deploy/vault-keypair.json` (gitignored). Keep a backup: losing it doesn't affect the deployed program, but it's needed to redeploy to the same address from scratch.
 
 ---
@@ -262,4 +276,5 @@ The program keypair lives at `target/deploy/vault-keypair.json` (gitignored). Ke
 [ ] pnpm check-env -> Result: PASS
 [ ] pnpm db:migrate
 [ ] pnpm build:vault && pnpm deploy:vault --execute
+[ ] pnpm vault:set-fees --execute
 ```

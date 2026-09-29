@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Outbound webhooks** (`transfer.settled`, `deposit.confirmed`, `withdrawal.sent`), signed with
   HMAC-SHA256 and replay-protected, delivered with retries and SSRF checks.
 - **Alchemy receiver and indexer** that records vault deposits made directly on-chain.
+- **Protocol fee**: 0.10% of each deposit and withdrawal, capped at 5 USDC, charged by the vault
+  in USDC to the treasury, with $VEXA discount tiers. The rate can never exceed 1%. The SDK quotes
+  it with the program's exact arithmetic (`vexa.money.quote()`).
 
 - **Vault program** (`programs/vault`): wraps USDC 1:1 into cUSDC, a Token-2022 mint with
   confidential transfers. Deposits land directly in the owner's pending confidential balance;

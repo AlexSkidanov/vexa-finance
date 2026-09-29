@@ -63,12 +63,13 @@ Proofs are generated **in the SDK, on the user's device**. The API relays cipher
 ```text
   deposit(amount)                            withdraw(amount)
   ───────────────                            ────────────────
-  user USDC ──transfer──▶ reserve            user cUSDC (public) ──burn──▶ ∅
-  ∅ ──mint──▶ user cUSDC                     reserve ──transfer──▶ any USDC account
+  user USDC ──fee──▶ treasury                user cUSDC (public) ──burn──▶ ∅
+  user USDC ──rest──▶ reserve                reserve ──fee──▶ treasury
+  ∅ ──mint rest──▶ user cUSDC                reserve ──rest──▶ any USDC account
   user cUSDC ──CT deposit──▶ pending balance
 ```
 
-The vault's config PDA is the only mint authority for cUSDC and the only owner of the USDC reserve, so the reserve always covers the supply. The mint has no freeze authority and no extensions beyond confidential transfers. Deposit and withdrawal amounts are public, as any USDC transfer is; everything in between is not.
+The vault's config PDA is the only mint authority for cUSDC and the only owner of the USDC reserve, so the reserve always covers the supply. The mint has no freeze authority and no extensions beyond confidential transfers. Deposit and withdrawal amounts are public, as any USDC transfer is; everything in between is not. That's also where the protocol fee is charged: 0.10% of each deposit and withdrawal, capped at 5 USDC, with discounts for $VEXA holders. Transfers between Vexa users are free.
 
 ### Keys from a passkey
 

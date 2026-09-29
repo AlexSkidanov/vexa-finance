@@ -105,7 +105,8 @@ sequenceDiagram
 
   Note over U: one transaction, signed by the user
   U->>V: deposit(amount)
-  V->>T: transfer_checked user USDC → reserve
+  V->>T: transfer_checked user USDC → treasury (fee)
+  V->>T: transfer_checked user USDC → reserve (amount − fee)
   V->>T22: mint_to_checked cUSDC → user (config PDA signs)
   V->>T22: ConfidentialTransfer::Deposit public → pending
   U->>T22: ApplyPendingBalance(new AE-encrypted balance)
@@ -129,13 +130,22 @@ sequenceDiagram
   T22->>ZK: verify equality proof, range proof
   U->>V: withdraw(amount)
   V->>T22: burn_checked user cUSDC (public balance)
-  V->>T: transfer_checked reserve → destination (config PDA signs)
+  V->>T: transfer_checked reserve → treasury (fee, config PDA signs)
+  V->>T: transfer_checked reserve → destination (amount − fee)
 ```
+
+### Protocol fee
+
+The vault charges 0.10% of each deposit and withdrawal, capped at 5 USDC, in USDC, to the treasury's USDC account. The schedule lives in a second PDA, `["fees"]`: rate, cap, treasury, and up to four $VEXA discount tiers. The admin sets it with `SetFees` (`pnpm vault:set-fees`); the program rejects any rate above 1%, and refuses deposits and withdrawals until a schedule exists rather than run without one.
+
+Charging on the vault's edges is a deliberate choice. Deposit and withdrawal amounts are public anyway, so the program can compute the fee itself and nobody can route around it. A fee on confidential transfers would need a second transfer to the treasury plus a percentage-with-cap proof binding the two, roughly doubling a transfer's transactions, and the fee's size would itself reveal something about the amount.
+
+The rate is rounded up, so every movement pays at least one base unit; otherwise splitting a deposit into dust would dodge the fee on transactions Vexa sponsors. $VEXA discounts are read from the owner's own token account, passed as an optional last account, so the program checks the balance itself. `quoteFee` in `@vexa/core/solana` repeats the arithmetic to the base unit so a device can show the fee and encrypt its new balance for what actually lands.
 
 ### Invariants the vault enforces
 
 - The config PDA is the only cUSDC mint authority and the only owner of the USDC reserve.
-- Every mint is paired with a USDC transfer in; every USDC release is paired with a burn.
+- Every mint is paired with a USDC transfer in; every USDC release is paired with a burn. Fees go to the treasury and never pass through the reserve, so the reserve equals the cUSDC supply.
 - The cUSDC mint has no freeze authority and no extensions besides ConfidentialTransfer, so nobody can freeze or seize balances.
 - Only the program's upgrade authority can initialize it, which closes the window in which a freshly deployed program could be initialized with a hostile mint.
 
