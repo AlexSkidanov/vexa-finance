@@ -65,6 +65,9 @@ importers:
       '@simplewebauthn/server':
         specifier: ^14.0.3
         version: 14.0.3
+      '@solana/kit':
+        specifier: ^8.3.0
+        version: 8.3.0(typescript@5.9.3)
       '@supabase/supabase-js':
         specifier: ^2.117.2
         version: 2.117.2
@@ -99,6 +102,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@noble/ciphers':
+        specifier: ^2
+        version: 2.4.0
       '@noble/curves':
         specifier: ^2.4.0
         version: 2.4.0
@@ -559,6 +565,10 @@ packages:
     engines: {node: ^22.20 || ^24.12 || >=25}
     cpu: [x64]
     os: [linux]
+
+  '@noble/ciphers@2.4.0':
+    resolution: {integrity: sha512-AnjFn0Jv92laAkvMrghlFZq4qQCIN/4DxFV/eooqtC2YTjB7kBeLMS2T9KJX4Dn+ZVXLOwK0lSgqDtx9gvxtiw==}
+    engines: {node: '>= 20.19.0'}
 
   '@noble/curves@2.4.0':
     resolution: {integrity: sha512-P4/62zrgfH33CneE3Dn4WhJVA22YUU0eR51wKIan4NVRvwsA0YnPTwWGpNbpuacSujmSFLvyzpyuR30+fbq2Ew==}
@@ -2565,6 +2575,8 @@ snapshots:
 
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     optional: true
+
+  '@noble/ciphers@2.4.0': {}
 
   '@noble/curves@2.4.0':
     dependencies:

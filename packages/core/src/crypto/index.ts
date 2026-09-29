@@ -131,3 +131,4 @@ export function isElGamalCiphertext(bytes: Uint8Array): boolean {
 export { AeKey, ElGamalKeypair };
 export * from './proofs.js';
 export * from './ristretto.js';
+export * from './memo.js';
