@@ -15,6 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Confidential transfers** between handles, with proofs built on the device and end-to-end
+  encrypted memos. A transfer is four sponsored transactions; the API only ever stores the
+  ciphertexts from its validity proof.
+- **Deposits, withdrawals, balances and activity** through `vexa.money` in the SDK, with users
+  needing no SOL: Vexa's fee payer co-signs under a strict sponsorship policy.
+- **Outbound webhooks** (`transfer.settled`, `deposit.confirmed`, `withdrawal.sent`), signed with
+  HMAC-SHA256 and replay-protected, delivered with retries and SSRF checks.
+- **Alchemy receiver and indexer** that records vault deposits made directly on-chain.
+
 - **Vault program** (`programs/vault`): wraps USDC 1:1 into cUSDC, a Token-2022 mint with
   confidential transfers. Deposits land directly in the owner's pending confidential balance;
   withdrawals burn cUSDC and release USDC to any account. Initialization is restricted to the

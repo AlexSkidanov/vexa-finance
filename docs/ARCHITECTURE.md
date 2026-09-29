@@ -143,11 +143,55 @@ sequenceDiagram
 
 Mainnet validators verify proofs with the `solana-zk-sdk` version built into their Agave release (7.x for Agave 4.3). A proof generated with a different major version fails with an algebraic-relation error. The vault tests generate proofs with the exact version mainnet uses, and `@solana/zk-sdk` 0.5.3 (the WASM build the SDK uses) produces proofs that mainnet accepts. This was verified by simulating one against mainnet.
 
+### Confidential transfer
+
+Proofs are too big for one Solana transaction (about 1.9 KB against a 1232-byte limit), so each is verified into a _context state account_ first and the transfer reads them from there. The fee payer is the contexts' authority, which keeps the range-proof transaction at 1207 bytes, and closes them in the last transaction, getting their rent back.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant D as Sender device (SDK)
+  participant A as Vexa API
+  participant S as Solana
+
+  D->>A: POST /v1/transfers/prepare {to: "@bob"}
+  A-->>D: transferId, Bob's ElGamal key and cUSDC account
+  D->>A: GET /v1/balance
+  A-->>D: sender's balance ciphertexts
+  Note over D: decrypt balance locally, build equality,<br/>validity and range proofs, encrypt memo,<br/>compile and sign the 4-transaction plan
+  D->>A: POST /v1/transfers/submit {plan}
+  A->>A: sponsorship policy; ciphertexts bound to sender, Bob, auditor
+  A->>S: 1 create 3 proof contexts
+  par
+    A->>S: 2a verify equality + validity
+  and
+    A->>S: 2b verify range (1207 bytes)
+  end
+  A->>S: 3 Transfer reading the contexts, close contexts
+  A->>A: store grouped ciphertexts, emit transfer.settled
+  A-->>D: 201
+```
+
+Bob's funds land in his _pending_ balance. He can read the amount straight away from the grouped ciphertexts (his handle is index 1), and applies the pending balance, or the SDK does it for him, before spending it.
+
+### Sponsored transactions
+
+Users hold USDC and no SOL, so Vexa's fee payer pays every network fee and some rent. It only co-signs a transaction that passes an allow-list (`apps/api/src/chain/sponsor.ts`). The fee payer may appear only:
+
+- as fee payer;
+- funding a proof context account, owned by the ZK ElGamal proof program, of a known size, with exactly its rent-exempt lamports;
+- sending exactly one confidential account's rent to the user, in an account-opening plan, only while that account doesn't exist;
+- as a proof context's authority, and as authority and refund destination when closing one.
+
+Token and vault instructions may only debit the caller's own account; a transfer may only pay the recipient named at prepare time. Every context a plan creates must be closed by the same plan. Lookup tables, unknown programs and oversized transactions are refused. Each transaction is simulated before sending, so a malformed one costs nothing, and if a plan fails halfway the API closes its open contexts itself.
+
+What sponsorship costs Vexa: an account opening is 0.00303 SOL of rent (3,032,760 lamports), once per user; after that, a deposit, transfer or withdrawal costs only transaction fees (a 4-transaction transfer is roughly 0.00004 SOL). Creating a USDC account for a withdrawal destination is never sponsored.
+
+### Deposits made outside the API
+
+Deposits are signed by users, so one can reach the vault without going through `POST /v1/deposits`. The Alchemy webhook watches the reserve; the indexer records any vault deposit it hasn't seen, attributing it to the registered wallet in the transaction, and emits `deposit.confirmed`. Notifications queue in `chain_events` and are retried with backoff before being parked as dead.
+
 ## Planned
-
-### Confidential transfers between handles (Phase 2)
-
-`POST /v1/transfers/prepare` resolves the recipient's ElGamal key and returns the unsigned instruction skeleton; the SDK builds the equality, ciphertext-validity and range proofs with the sender's keys and signs; `POST /v1/transfers/submit` co-signs as fee payer and broadcasts. Large proofs go into context-state accounts to stay within transaction size limits.
 
 ### Agent accounts (Phase 3)
 

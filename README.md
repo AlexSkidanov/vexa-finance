@@ -115,7 +115,7 @@ These land in upcoming releases; see [Status](#status). The designs are summariz
 | ----- | ---------------------------------------------------------------------------------------- | ----------------------------------- |
 | 0     | Environment and secrets audit                                                            | ✅ Done                             |
 | 1     | Monorepo, API, Supabase schema and RLS, email + passkey auth, handles, vault program, CI | ✅ Vault live on mainnet, in review |
-| 2     | Deposits, confidential transfers, withdrawals, fees, webhooks                            | Planned                             |
+| 2     | Deposits, confidential transfers, withdrawals, fees, webhooks                            | 🚧 In progress                      |
 | 3     | Agent accounts and policies, x402 payments, stealth mode, view keys, $VEXA               | Planned                             |
 
 Card issuing and KYC ship as interfaces with mock implementations first.
