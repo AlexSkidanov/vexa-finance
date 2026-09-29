@@ -22,8 +22,10 @@ import {
 } from '@vexa/core';
 import { request, VexaError, type HttpOptions, type RequestOptions } from './http.js';
 import { createPasskey, getPasskeyAssertion } from './passkeys.js';
+import { Money } from './money.js';
 
 export { VexaError };
+export type { ActivityMovement, ActivityTransfer, Balance } from './money.js';
 export type { ApiKeySummary, CreatedApiKey, HandleResolution, Profile, Session };
 
 export const DEFAULT_BASE_URLS: Record<ApiEnvironment, string> = {
@@ -193,6 +195,9 @@ export class Vexa {
     list: async () => (await this.call<{ data: ApiKeySummary[] }>('GET', '/v1/api-keys')).data,
     revoke: (id: string) => this.call<void>('DELETE', `/v1/api-keys/${encodeURIComponent(id)}`),
   };
+
+  /** Deposits, confidential transfers, withdrawals, balances and activity. */
+  readonly money: Money = new Money((method, path, opts) => this.call(method, path, opts));
 
   me(): Promise<Profile> {
     return this.call<Profile>('GET', '/v1/me');
