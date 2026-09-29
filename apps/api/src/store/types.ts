@@ -56,7 +56,15 @@ export class HandleConflict extends Error {
   }
 }
 
-export type TransferStatus = 'pending' | 'submitted' | 'settled' | 'failed';
+export type TransferStatus =
+  | 'pending'
+  | 'submitted'
+  | 'settled'
+  | 'failed'
+  | 'routing'
+  | 'shielded'
+  | 'returning'
+  | 'refunded';
 
 /** Transfer amounts exist only inside `ciphertext`. */
 export interface TransferRow {
@@ -161,6 +169,53 @@ export interface AuditRow {
   txSig: string | null;
   record: Uint8Array;
 }
+
+export type StealthStatus =
+  | 'awaiting_funds'
+  | 'routing'
+  | 'shielded'
+  | 'returning'
+  | 'settling'
+  | 'settled'
+  | 'refunding'
+  | 'refunded'
+  | 'failed';
+
+/** A stealth route: addresses and statuses only, never an amount. */
+export interface StealthRouteRow {
+  transferId: string;
+  senderId: string;
+  status: StealthStatus;
+  entryAddress: string;
+  exitAddress: string;
+  zcashAddress: string | null;
+  leg1DepositAddress: string | null;
+  leg2DepositAddress: string | null;
+  zcashTxid: string | null;
+  leg2Attempts: number;
+  recipientCusdc: string;
+  senderCusdc: string;
+  attempts: number;
+  lastError: string | null;
+  signatures: string[];
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export type StealthRoutePatch = Partial<
+  Pick<
+    StealthRouteRow,
+    | 'status'
+    | 'zcashAddress'
+    | 'leg1DepositAddress'
+    | 'leg2DepositAddress'
+    | 'zcashTxid'
+    | 'leg2Attempts'
+    | 'attempts'
+    | 'lastError'
+    | 'signatures'
+  >
+> & { nextAttemptAt?: Date };
 
 export interface EventRow {
   id: string;
@@ -278,6 +333,15 @@ export interface Store {
       },
     ): Promise<TransferRow>;
     failTransfer(id: string, reason: string, signatures: string[]): Promise<void>;
+    /** Stealth transfers move through routing, shielded, returning and refunded too. */
+    setTransferStatus(
+      id: string,
+      status: 'submitted' | 'routing' | 'shielded' | 'returning' | 'refunded' | 'failed',
+    ): Promise<void>;
+    /** Merges into the transfer's ciphertext JSON (e.g. the sender's own note). */
+    addTransferCiphertext(id: string, ciphertext: Record<string, string>): Promise<void>;
+    /** Any transfer by id, for the stealth worker. */
+    transferById(id: string): Promise<TransferRow | null>;
     recordDeposit(input: {
       ownerId: string;
       txSig: string | null;
@@ -354,6 +418,24 @@ export interface Store {
     /** An unrevoked key by the hash of its access secret. */
     byAccessHash(hash: string): Promise<ViewKeyRow | null>;
     exportRows(key: ViewKeyRow): Promise<AuditRow[]>;
+  };
+
+  stealth: {
+    create(
+      input: Pick<
+        StealthRouteRow,
+        | 'transferId'
+        | 'senderId'
+        | 'entryAddress'
+        | 'exitAddress'
+        | 'recipientCusdc'
+        | 'senderCusdc'
+      >,
+    ): Promise<StealthRouteRow>;
+    get(transferId: string, senderId: string): Promise<StealthRouteRow | null>;
+    /** Leases up to `limit` due routes that aren't finished. */
+    claimDue(limit: number, leaseSeconds: number): Promise<StealthRouteRow[]>;
+    update(transferId: string, patch: StealthRoutePatch): Promise<void>;
   };
 
   events: {

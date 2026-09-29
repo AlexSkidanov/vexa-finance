@@ -291,9 +291,22 @@ export class Money {
    * memo are encrypted on this device; Vexa never learns either.
    */
   async transfer(
-    input: { to: string; amount: bigint; memo?: string; idempotencyKey?: string },
+    input: {
+      to: string;
+      amount: bigint;
+      memo?: string;
+      idempotencyKey?: string;
+      /**
+       * `stealth` routes the payment through the Zcash shielded pool (via NEAR
+       * Intents) so nothing on-chain links sender and recipient. It takes
+       * 10 to 30 minutes, costs bridge fees (about 0.6 USDC plus the vault's
+       * 0.10% twice), and needs at least 5 USDC. Track it with transferStatus().
+       */
+      mode?: 'standard' | 'stealth';
+    },
     keys: UserKeys,
   ): Promise<{ id: string; txSig: string | null }> {
+    if (input.mode === 'stealth') return this.stealthTransfer(input, keys);
     let raw = await this.raw();
     if (!raw.confidential) throw new Error('open the account first: money.openAccount()');
     let balance = this.decrypt(raw, keys);
@@ -349,6 +362,79 @@ export class Money {
       },
       idempotencyKey: input.idempotencyKey ? `${input.idempotencyKey}:submit` : true,
     });
+  }
+
+  /** Minimum stealth transfer: below this, bridge fees and minimums eat it. */
+  static readonly STEALTH_MINIMUM = 5_000_000n;
+
+  private async stealthTransfer(
+    input: { to: string; amount: bigint; idempotencyKey?: string },
+    keys: UserKeys,
+  ): Promise<{ id: string; txSig: string | null }> {
+    if (input.amount < Money.STEALTH_MINIMUM) throw new Error('stealth transfers start at 5 USDC');
+    const raw = await this.raw();
+    if (!raw.confidential) throw new Error('open the account first: money.openAccount()');
+    const { available } = this.decrypt(raw, keys);
+    if (available < input.amount) throw new Error('insufficient confidential balance');
+    const prepared = await this.call<{ transferId: string; stealth: { depositAccount: string } }>(
+      'POST',
+      '/v1/transfers/prepare',
+      {
+        body: { to: input.to, mode: 'stealth' },
+        idempotencyKey: input.idempotencyKey ? `${input.idempotencyKey}:prepare` : true,
+      },
+    );
+    const [ctx, fresh] = await Promise.all([this.chain(), this.raw()]);
+    const plan = await withdrawPlan({
+      vault: this.vault(ctx),
+      feePayer: address(ctx.feePayer),
+      owner: await createKeyPairSignerFromPrivateKeyBytes(keys.solanaSeed),
+      ownerCusdc: address(fresh.cusdcAccount),
+      destination: address(prepared.stealth.depositAccount),
+      amount: input.amount,
+      discountAccounts: fresh.feeDiscount?.accounts.map((a) => address(a)),
+      decimals: 6,
+      proofs: buildWithdrawProofs({
+        elgamal: keys.elgamal,
+        ae: keys.ae,
+        availableBalance: b64(fresh.confidential!.availableBalance),
+        decryptableAvailableBalance: b64(fresh.confidential!.decryptableAvailableBalance),
+        amount: input.amount,
+      }),
+      rent: rentTable(ctx),
+    });
+    const res = await this.call<{ id: string }>('POST', '/v1/transfers/submit', {
+      body: {
+        transferId: prepared.transferId,
+        plan: await this.compile(plan, ctx),
+        // Only you can read this: your activity shows what you sent.
+        senderNote: base64Encode(keys.ae.encrypt(input.amount).toBytes()),
+      },
+      idempotencyKey: input.idempotencyKey ? `${input.idempotencyKey}:submit` : true,
+    });
+    return { id: res.id, txSig: null };
+  }
+
+  /** A transfer you sent; stealth transfers include their route's progress. */
+  transferStatus(id: string): Promise<{
+    id: string;
+    status: string;
+    txSig: string | null;
+    stealth?: {
+      status:
+        | 'awaiting_funds'
+        | 'routing'
+        | 'shielded'
+        | 'returning'
+        | 'settling'
+        | 'settled'
+        | 'refunding'
+        | 'refunded'
+        | 'failed';
+      updatedAt: string;
+    };
+  }> {
+    return this.call('GET', `/v1/transfers/${id}`);
   }
 
   /**
@@ -472,20 +558,28 @@ export class Money {
         to: string;
         txSig: string | null;
         createdAt: string;
-        ciphertext: { groupedLo: string; groupedHi: string };
+        ciphertext: { groupedLo?: string; groupedHi?: string; senderNote?: string };
         memoCiphertext: string | null;
       };
       const role = t.direction === 'sent' ? 0 : 1;
+      // A stealth transfer's sender reads their own note; the recipient reads
+      // what the route paid them, once it has.
+      const note = t.direction === 'sent' ? t.ciphertext.senderNote : undefined;
+      const amount = note
+        ? (AeCiphertext.fromBytes(b64(note))?.decrypt(keys.ae) ?? 0n)
+        : t.ciphertext.groupedLo && t.ciphertext.groupedHi
+          ? decryptTransferAmount(
+              secret,
+              b64(t.ciphertext.groupedLo),
+              b64(t.ciphertext.groupedHi),
+              role,
+            )
+          : 0n;
       return {
         kind: 'transfer',
         id: t.id,
         direction: t.direction,
-        amount: decryptTransferAmount(
-          secret,
-          b64(t.ciphertext.groupedLo),
-          b64(t.ciphertext.groupedHi),
-          role,
-        ),
+        amount,
         memo: t.memoCiphertext
           ? decryptMemo(
               b64(t.memoCiphertext),

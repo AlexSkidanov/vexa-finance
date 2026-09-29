@@ -40,6 +40,8 @@ import { authenticate, principalOf } from '../middleware/auth.js';
 import { idempotent } from '../middleware/idempotency.js';
 import { parseBody } from '../lib/validate.js';
 import { executePlan, PlanFailed } from '../chain/execute.js';
+import { routeAccount } from '../stealth/keys.js';
+import { ensureUsdcAccount } from '../stealth/accounts.js';
 import { readFeeSchedule, readVexaPosition } from '../lib/tier.js';
 import {
   checkPlan,
@@ -359,12 +361,11 @@ export const money = new Hono<AppBindings>()
   .post('/transfers/prepare', authenticate(), idempotent(), async (c) => {
     const { store, chain, vault } = c.get('deps');
     const body = await parseBody(c, PrepareTransferRequest);
+    const stealth = body.mode === 'stealth' ? c.get('deps').stealth : null;
     if (body.mode === 'stealth') {
-      throw new ApiError(
-        400,
-        ErrorCode.InvalidRequest,
-        'Stealth transfers arrive with agents in the next release',
-      );
+      if (!stealth) throw notFound('Stealth transfers');
+      if (body.agentId || body.to.startsWith('agent:'))
+        throw new ApiError(400, ErrorCode.InvalidRequest, 'Stealth transfers are between handles');
     }
     const me = await owner(c);
     const { userId } = principalOf(c);
@@ -425,11 +426,33 @@ export const money = new Hono<AppBindings>()
       toOwnerId: recipient.ownerId,
       toHandle: recipient.handle,
       toPubkey: recipientCusdc,
-      mode: 'standard',
+      mode: body.mode,
     });
+
+    // Stealth: the sender withdraws to a one-time entry address, which the
+    // stealth worker routes through Zcash. Its USDC account is created now so
+    // the withdrawal has somewhere to land (the rent comes back at cleanup).
+    let depositAccount: Address | undefined;
+    if (stealth) {
+      const [entry, exit] = await Promise.all([
+        routeAccount(stealth.seed, transfer.id, 'entry'),
+        routeAccount(stealth.seed, transfer.id, 'exit'),
+      ]);
+      depositAccount = await ensureUsdcAccount({ chain, vault }, entry.signer.address);
+      await store.stealth.create({
+        transferId: transfer.id,
+        senderId: me.userId,
+        entryAddress: entry.signer.address,
+        exitAddress: exit.signer.address,
+        recipientCusdc,
+        senderCusdc: me.cusdc,
+      });
+    }
     return c.json(
       {
         transferId: transfer.id,
+        mode: body.mode,
+        ...(depositAccount ? { stealth: { depositAccount } } : {}),
         recipient: {
           handle: recipient.handle ? formatHandle(recipient.handle) : null,
           solanaPubkey: recipient.solanaPubkey,
@@ -445,11 +468,12 @@ export const money = new Hono<AppBindings>()
   .post('/transfers/submit', authenticate(), idempotent(), async (c) => {
     const { store, chain, vault } = c.get('deps');
     const body = await parseBody(c, SubmitTransferRequest);
-    if (body.plan.kind !== 'transfer')
-      throw new ApiError(400, ErrorCode.PlanRefused, 'expected a transfer plan');
     const me = await owner(c);
     const transfer = await store.money.getTransfer(body.transferId, me.userId);
     if (!transfer) throw notFound('Transfer');
+    if (transfer.mode === 'stealth') return submitStealth(c, me, transfer, body);
+    if (body.plan.kind !== 'transfer')
+      throw new ApiError(400, ErrorCode.PlanRefused, 'expected a transfer plan');
     if (transfer.fromAgentId) {
       throw new ApiError(
         400,
@@ -524,6 +548,21 @@ export const money = new Hono<AppBindings>()
     return c.json(transferJson(settled, 'sent'), 201);
   })
 
+  /** A transfer you sent, with its stealth route's progress if it has one. */
+  .get('/transfers/:id', authenticate(), async (c) => {
+    const { store } = c.get('deps');
+    const { userId } = principalOf(c);
+    const transfer = await store.money.getTransfer(c.req.param('id'), userId);
+    if (!transfer) throw notFound('Transfer');
+    const route = transfer.mode === 'stealth' ? await store.stealth.get(transfer.id, userId) : null;
+    return c.json({
+      ...transferJson(transfer, 'sent'),
+      ...(route
+        ? { stealth: { status: route.status, updatedAt: route.updatedAt.toISOString() } }
+        : {}),
+    });
+  })
+
   /**
    * Transfers sent and received, deposits and withdrawals, newest first.
    * Transfer amounts come as grouped ciphertexts: the sender decrypts with
@@ -569,6 +608,50 @@ function transferJson(t: TransferRow, direction: 'sent' | 'received') {
     txSig: t.txSig,
     createdAt: t.createdAt.toISOString(),
   };
+}
+
+/**
+ * A stealth transfer's first leg: the sender's withdrawal to the route's
+ * entry address. From there the stealth worker takes over.
+ */
+async function submitStealth(
+  c: C,
+  me: Awaited<ReturnType<typeof owner>>,
+  transfer: TransferRow,
+  body: SubmitTransferRequest,
+) {
+  const { store, vault } = c.get('deps');
+  if (body.plan.kind !== 'withdraw')
+    throw new ApiError(
+      400,
+      ErrorCode.PlanRefused,
+      'a stealth transfer starts with a withdraw plan',
+    );
+  if (transfer.status !== 'pending')
+    throw new ApiError(
+      409,
+      ErrorCode.TransferAlreadySubmitted,
+      'This transfer was already submitted',
+    );
+  const route = await store.stealth.get(transfer.id, me.userId);
+  if (!route) throw notFound('Stealth route');
+  const entryUsdc = await findAta(address(route.entryAddress), vault.usdcMint, TOKEN_PROGRAM);
+  const checked = check(
+    body.plan.stages,
+    await sponsorContext(c, 'withdraw', me, { counterparty: entryUsdc }),
+  );
+  await store.money.markTransferSubmitted(transfer.id);
+  let signatures: string[];
+  try {
+    signatures = await run(c, checked);
+  } catch (e) {
+    await store.money.failTransfer(transfer.id, e instanceof Error ? e.message : 'failed', []);
+    throw e;
+  }
+  if (body.senderNote)
+    await store.money.addTransferCiphertext(transfer.id, { senderNote: body.senderNote });
+  await store.stealth.update(transfer.id, { signatures, nextAttemptAt: new Date() });
+  return c.json({ id: transfer.id, mode: 'stealth', status: 'submitted', signatures }, 202);
 }
 
 async function recipientOwnerId(c: C, handle: string): Promise<string | null> {

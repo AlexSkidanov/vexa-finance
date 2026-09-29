@@ -101,6 +101,7 @@ export function testApp(overrides: Partial<Deps> = {}) {
     chain: offlineChain,
     vault: TEST_VAULT,
     policy: null,
+    stealth: null,
     version: 'test',
     ...overrides,
   };

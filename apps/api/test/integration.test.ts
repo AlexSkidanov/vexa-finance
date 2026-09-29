@@ -264,6 +264,7 @@ describe.skipIf(!enabled)('integration: Supabase + Postgres', () => {
       chain: offlineChain,
       vault: TEST_VAULT,
       policy: null,
+      stealth: null,
       version: 'it',
     });
     const session = await auth.sessionForUser(id);

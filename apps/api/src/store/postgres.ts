@@ -4,6 +4,7 @@ import {
   type ActivityItem,
   type AgentRow,
   type AgentTraceRow,
+  type StealthRouteRow,
   type ViewKeyRow,
   type PolicyRow,
   type EventRow,
@@ -113,6 +114,26 @@ export function createPostgresStore(url: string): Store & { close(): Promise<voi
     step: r.step,
     detail: r.detail ?? {},
     createdAt: r.created_at,
+  });
+
+  const toRoute = (r: postgres.Row): StealthRouteRow => ({
+    transferId: r.transfer_id,
+    senderId: r.sender_id,
+    status: r.status,
+    entryAddress: r.entry_address,
+    exitAddress: r.exit_address,
+    zcashAddress: r.zcash_address,
+    leg1DepositAddress: r.leg1_deposit_address,
+    leg2DepositAddress: r.leg2_deposit_address,
+    zcashTxid: r.zcash_txid,
+    leg2Attempts: r.leg2_attempts,
+    recipientCusdc: r.recipient_cusdc,
+    senderCusdc: r.sender_cusdc,
+    attempts: r.attempts,
+    lastError: r.last_error,
+    signatures: r.signatures ?? [],
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
   });
 
   const toViewKey = (r: postgres.Row): ViewKeyRow => ({
@@ -347,6 +368,18 @@ export function createPostgresStore(url: string): Store & { close(): Promise<voi
           update public.transfers set status = 'failed', failure_reason = ${reason}, signatures = ${signatures}
           where id = ${id}`;
       },
+      async setTransferStatus(id, status) {
+        await sql`update public.transfers set status = ${status} where id = ${id}`;
+      },
+      async addTransferCiphertext(id, ciphertext) {
+        await sql`
+          update public.transfers set ciphertext = ciphertext || ${sql.json(ciphertext)}
+          where id = ${id}`;
+      },
+      async transferById(id) {
+        const [row] = await sql`select * from public.transfers where id = ${id}`;
+        return row ? toTransfer(row) : null;
+      },
       async recordAgentPayment(p) {
         await sql`
           insert into public.agent_payments (transfer_id, agent_id, payment_index)
@@ -471,6 +504,54 @@ export function createPostgresStore(url: string): Store & { close(): Promise<voi
           where agent_id = ${agentId} ${requestId ? sql`and request_id = ${requestId}` : sql``}
           order by created_at desc limit ${limit}`;
         return rows.map(toTrace);
+      },
+    },
+
+    stealth: {
+      async create(r) {
+        const [row] = await sql`
+          insert into public.stealth_routes
+            (transfer_id, sender_id, entry_address, exit_address, recipient_cusdc, sender_cusdc)
+          values (${r.transferId}, ${r.senderId}, ${r.entryAddress}, ${r.exitAddress},
+                  ${r.recipientCusdc}, ${r.senderCusdc})
+          returning *`;
+        return toRoute(row!);
+      },
+      async get(transferId, senderId) {
+        const [row] = await sql`
+          select * from public.stealth_routes
+          where transfer_id = ${transferId} and sender_id = ${senderId}`;
+        return row ? toRoute(row) : null;
+      },
+      async claimDue(limit, leaseSeconds) {
+        const rows = await sql`
+          update public.stealth_routes r
+          set lease_until = now() + ${leaseSeconds} * interval '1 second'
+          where r.transfer_id in (
+            select transfer_id from public.stealth_routes
+            where status not in ('settled', 'refunded', 'failed')
+              and next_attempt_at <= now()
+              and (lease_until is null or lease_until <= now())
+            order by next_attempt_at
+            limit ${limit}
+            for update skip locked
+          )
+          returning r.*`;
+        return rows.map(toRoute);
+      },
+      async update(transferId, p) {
+        const set: Record<string, unknown> = { lease_until: null };
+        if (p.status) set.status = p.status;
+        if (p.zcashAddress !== undefined) set.zcash_address = p.zcashAddress;
+        if (p.leg1DepositAddress !== undefined) set.leg1_deposit_address = p.leg1DepositAddress;
+        if (p.leg2DepositAddress !== undefined) set.leg2_deposit_address = p.leg2DepositAddress;
+        if (p.zcashTxid !== undefined) set.zcash_txid = p.zcashTxid;
+        if (p.attempts !== undefined) set.attempts = p.attempts;
+        if (p.leg2Attempts !== undefined) set.leg2_attempts = p.leg2Attempts;
+        if (p.lastError !== undefined) set.last_error = p.lastError?.slice(0, 1000) ?? null;
+        if (p.signatures !== undefined) set.signatures = p.signatures;
+        if (p.nextAttemptAt) set.next_attempt_at = p.nextAttemptAt;
+        await sql`update public.stealth_routes set ${sql(set)} where transfer_id = ${transferId}`;
       },
     },
 

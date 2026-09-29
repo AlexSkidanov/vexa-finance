@@ -187,6 +187,11 @@ const Base64 = z.string().regex(/^[A-Za-z0-9+/]*={0,2}$/, 'must be base64');
 
 export const SubmitTransferRequest = z.object({
   transferId: z.uuid(),
+  /**
+   * Stealth transfers only: the amount encrypted to the sender's own AE key,
+   * so their activity can show it. Nobody else can read it.
+   */
+  senderNote: Base64.max(64).optional(),
   plan: CompiledPlanSchema,
   /** Encrypted on the device to the recipient; the API stores it opaquely. */
   memoCiphertext: Base64.max(1400).optional(),

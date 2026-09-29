@@ -5,6 +5,7 @@ import {
   type AgentRow,
   type AgentTraceRow,
   type AuditRow,
+  type StealthRouteRow,
   type ViewKeyRow,
   type EventRow,
   type MovementRow,
@@ -42,6 +43,7 @@ export function createMemoryStore(): Store {
   const agents = new Map<string, AgentRow>();
   const agentPayments: { transferId: string; agentId: string; index: number }[] = [];
   const traces: AgentTraceRow[] = [];
+  const stealthRoutes = new Map<string, StealthRouteRow & { due: number; lease: number }>();
   const viewKeys = new Map<string, ViewKeyRow & { accessHash: string }>();
   const viewRecords = new Map<string, Map<string, Uint8Array>>();
   const deposits: MovementRow[] = [];
@@ -240,6 +242,17 @@ export function createMemoryStore(): Store {
         const t = transfers.get(id);
         if (t) Object.assign(t, { status: 'failed', failureReason: reason, signatures });
       },
+      async setTransferStatus(id, status) {
+        const t = transfers.get(id);
+        if (t) t.status = status as TransferRow['status'];
+      },
+      async addTransferCiphertext(id, ciphertext) {
+        const t = transfers.get(id);
+        if (t) t.ciphertext = { ...t.ciphertext, ...ciphertext };
+      },
+      async transferById(id) {
+        return transfers.get(id) ?? null;
+      },
       async recordAgentPayment(p) {
         agentPayments.push(p);
       },
@@ -353,6 +366,53 @@ export function createMemoryStore(): Store {
           .filter((t) => t.agentId === agentId && (!requestId || t.requestId === requestId))
           .reverse()
           .slice(0, limit);
+      },
+    },
+
+    stealth: {
+      async create(r) {
+        const row = {
+          ...r,
+          status: 'awaiting_funds' as const,
+          zcashAddress: null,
+          leg1DepositAddress: null,
+          leg2DepositAddress: null,
+          zcashTxid: null,
+          leg2Attempts: 0,
+          attempts: 0,
+          lastError: null,
+          signatures: [],
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          due: Date.now(),
+          lease: 0,
+        };
+        stealthRoutes.set(r.transferId, row);
+        return row;
+      },
+      async get(transferId, senderId) {
+        const r = stealthRoutes.get(transferId);
+        return r && r.senderId === senderId ? r : null;
+      },
+      async claimDue(limit, leaseSeconds) {
+        const now = Date.now();
+        const due = [...stealthRoutes.values()]
+          .filter(
+            (r) =>
+              !['settled', 'refunded', 'failed'].includes(r.status) &&
+              r.due <= now &&
+              r.lease <= now,
+          )
+          .slice(0, limit);
+        for (const r of due) r.lease = now + leaseSeconds * 1000;
+        return due;
+      },
+      async update(transferId, patch) {
+        const r = stealthRoutes.get(transferId);
+        if (!r) return;
+        const { nextAttemptAt, ...rest } = patch;
+        Object.assign(r, rest, { updatedAt: new Date(), lease: 0 });
+        if (nextAttemptAt) r.due = nextAttemptAt.getTime();
       },
     },
 

@@ -1,5 +1,8 @@
 import { createPolicyContract } from './agents/policy.js';
 import { createNearClient } from './near/client.js';
+import { createOneClick } from './stealth/oneclick.js';
+import { createZingoWallet } from './stealth/zcash.js';
+import { startStealthWorker } from './stealth/worker.js';
 import { serve } from '@hono/node-server';
 import { createApp } from './app.js';
 import { loadEnv } from './env.js';
@@ -53,6 +56,26 @@ const policy =
     : null;
 if (!policy) logger.warn('NEAR policy contract not configured: agents are disabled');
 
+const stealth =
+  env.STEALTH_ROUTE_SEED && env.ZCASH_SEED && env.ZCASH_BIRTHDAY
+    ? {
+        seed: env.STEALTH_ROUTE_SEED,
+        oneClick: createOneClick({
+          baseUrl: env.INTENTS_1CLICK_BASE_URL,
+          apiKey: env.INTENTS_1CLICK_API_KEY,
+        }),
+        zcash: createZingoWallet({
+          cliPath: env.ZINGO_CLI_PATH,
+          dataDir: env.ZCASH_DATA_DIR,
+          server: env.ZCASH_LIGHTWALLETD_URL,
+          seed: env.ZCASH_SEED,
+          birthday: env.ZCASH_BIRTHDAY,
+          nymProxy: env.ZINGO_NYM_PROXY,
+        }),
+      }
+    : null;
+if (!stealth) logger.warn('stealth routing not configured: stealth transfers are disabled');
+
 const app = createApp({
   env,
   logger,
@@ -60,6 +83,7 @@ const app = createApp({
   chain,
   vault,
   policy,
+  stealth,
   version:
     process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 7) ?? process.env.npm_package_version ?? 'dev',
   auth: createSupabaseAuthProvider({
@@ -106,6 +130,16 @@ void watchAddresses({
   logger,
 });
 
+const stopStealthWorker = stealth
+  ? startStealthWorker({
+      store,
+      chain,
+      vault,
+      logger: logger.child({ worker: 'stealth' }),
+      router: stealth,
+    })
+  : () => {};
+
 const server = serve({ fetch: app.fetch, port: env.PORT }, (info) => {
   logger.info(
     { port: info.port, cluster: env.SOLANA_CLUSTER, environment: env.API_ENVIRONMENT },
@@ -123,6 +157,7 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     logger.info({ signal }, 'shutting down');
     stopWebhookWorker();
     stopIndexer();
+    stopStealthWorker();
     server.close(async () => {
       await store.close();
       process.exit(0);
