@@ -56,8 +56,15 @@ describe.skipIf(!enabled)('integration: Supabase + Postgres', () => {
     for (const id of users) await admin.auth.admin.deleteUser(id);
     // Handles outlive their owners on purpose (no recycling), so clean up by hand.
     const sql = (await import('postgres')).default(env.SUPABASE_DB_URL, { max: 1, prepare: false });
-    if (handlesToDelete.length)
+    if (transfersToDelete.length) {
+      await sql`delete from public.transfers where id in ${sql(transfersToDelete)}`;
+    }
+    if (chainEventsToDelete.length) {
+      await sql`delete from public.chain_events where external_id in ${sql(chainEventsToDelete)}`;
+    }
+    if (handlesToDelete.length) {
       await sql`delete from public.handles where handle in ${sql(handlesToDelete)}`;
+    }
     await sql.end();
     await store.close();
   });
