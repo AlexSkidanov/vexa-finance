@@ -559,6 +559,112 @@ fn a_vault_without_a_fee_schedule_moves_nothing() {
 }
 
 // ---------------------------------------------------------------------------
+// $VEXA staking
+// ---------------------------------------------------------------------------
+
+#[test]
+fn staking_locks_vexa_for_a_week() {
+    let mut env = setup();
+    let mint = env.launch_vexa();
+    let alice = env.user(1);
+    let sponsor = Keypair::new();
+    env.svm.airdrop(&sponsor.pubkey(), 1_000_000_000).unwrap();
+    env.give_vexa(&mint, &alice, 5_000 * USDC);
+
+    // The sponsor pays for the record and the vault; Alice needs no SOL.
+    let ix = env.stake_ix(&mint, &alice, &sponsor.pubkey(), 3_000 * USDC);
+    env.send(&[ix], &sponsor, &[&alice.kp]).unwrap();
+    assert_eq!(env.staked(&alice.kp.pubkey()), 3_000 * USDC);
+    assert_eq!(env.usdc_balance(&env.stake_vault(&mint)), 3_000 * USDC);
+
+    let err = env.send(&[env.unstake_ix(&mint, &alice, USDC)], &alice.kp, &[]).unwrap_err();
+    assert!(err.contains(&code(VaultError::StakeLocked)), "{err}");
+
+    env.warp(vault::stake::STAKE_LOCK_SECONDS);
+    let err = env.send(&[env.unstake_ix(&mint, &alice, 3_001 * USDC)], &alice.kp, &[]).unwrap_err();
+    assert!(err.contains(&code(VaultError::InsufficientStake)), "{err}");
+    env.send(&[env.unstake_ix(&mint, &alice, 1_000 * USDC)], &alice.kp, &[]).unwrap();
+    assert_eq!(env.staked(&alice.kp.pubkey()), 2_000 * USDC);
+
+    // Topping up relocks the whole position.
+    let ix = env.stake_ix(&mint, &alice, &sponsor.pubkey(), USDC);
+    env.send(&[ix], &sponsor, &[&alice.kp]).unwrap();
+    let err = env.send(&[env.unstake_ix(&mint, &alice, USDC)], &alice.kp, &[]).unwrap_err();
+    assert!(err.contains(&code(VaultError::StakeLocked)), "{err}");
+}
+
+#[test]
+fn staking_needs_a_vexa_mint_and_the_owners_tokens() {
+    let mut env = setup();
+    let alice = env.user(1);
+    let bob = env.user(1);
+    let admin = env.admin.insecure_clone();
+    let mint = create_usdc_mint(&mut env.svm, &admin, &admin.pubkey());
+    env.give_vexa(&mint, &alice, 10 * USDC);
+    // No $VEXA mint in the fee schedule yet.
+    let ix = env.stake_ix(&mint, &alice, &admin.pubkey(), USDC);
+    let err = env.send(&[ix], &admin, &[&alice.kp]).unwrap_err();
+    assert!(err.contains(&code(VaultError::VexaNotSet)), "{err}");
+
+    let mint = env.launch_vexa();
+    env.give_vexa(&mint, &alice, 10 * USDC);
+    // Bob can't stake Alice's tokens into his own record.
+    let mut ix = env.stake_ix(&mint, &bob, &admin.pubkey(), USDC);
+    ix.accounts[5].pubkey = get_associated_token_address_with_program_id(
+        &alice.kp.pubkey(),
+        &mint,
+        &spl_token_interface::id(),
+    );
+    let err = env.send(&[ix], &admin, &[&bob.kp]).unwrap_err();
+    assert!(err.contains(&code(VaultError::TokenOwnerMismatch)), "{err}");
+}
+
+#[test]
+fn stake_counts_in_full_and_wallet_vexa_at_half() {
+    let mut env = setup();
+    let mint = env.launch_vexa();
+    let admin = env.admin.insecure_clone();
+    let alice = env.user(1_000);
+    let wallet = env.give_vexa(&mint, &alice, 20_000 * USDC);
+
+    // 20k in the wallet weighs 10k: 25% off 0.10 USDC.
+    let ix = env.deposit_ix_with(&alice, 100 * USDC, Some(wallet));
+    env.send(&[ix], &alice.kp, &[]).unwrap();
+    assert_eq!(env.usdc_balance(&env.treasury), 75_000);
+
+    // Stake 10k and keep 10k: 10k + 5k = 15k, still the 10k tier.
+    let ix = env.stake_ix(&mint, &alice, &admin.pubkey(), 10_000 * USDC);
+    env.send(&[ix], &admin, &[&alice.kp]).unwrap();
+    let mut ix = env.deposit_ix_with(&alice, 100 * USDC, Some(wallet));
+    ix.accounts.push(AccountMeta::new_readonly(stake_pda(&alice.kp.pubkey()), false));
+    env.send(&[ix], &alice.kp, &[]).unwrap();
+    assert_eq!(env.usdc_balance(&env.treasury), 150_000);
+
+    // Stake the rest: 20k staked, and the stake record alone is enough.
+    let ix = env.stake_ix(&mint, &alice, &admin.pubkey(), 10_000 * USDC);
+    env.send(&[ix], &admin, &[&alice.kp]).unwrap();
+    let ix = env.deposit_ix_with(&alice, 100 * USDC, Some(stake_pda(&alice.kp.pubkey())));
+    env.send(&[ix], &alice.kp, &[]).unwrap();
+    assert_eq!(env.usdc_balance(&env.treasury), 225_000);
+}
+
+#[test]
+fn nobody_can_borrow_someone_elses_stake_for_a_discount() {
+    let mut env = setup();
+    let mint = env.launch_vexa();
+    let admin = env.admin.insecure_clone();
+    let alice = env.user(10);
+    let bob = env.user(10);
+    env.give_vexa(&mint, &alice, 1_000_000 * USDC);
+    let ix = env.stake_ix(&mint, &alice, &admin.pubkey(), 1_000_000 * USDC);
+    env.send(&[ix], &admin, &[&alice.kp]).unwrap();
+
+    let ix = env.deposit_ix_with(&bob, USDC, Some(stake_pda(&alice.kp.pubkey())));
+    let err = env.send(&[ix], &bob.kp, &[]).unwrap_err();
+    assert!(err.contains(&code(VaultError::TokenOwnerMismatch)), "{err}");
+}
+
+// ---------------------------------------------------------------------------
 // invariant
 // ---------------------------------------------------------------------------
 

@@ -547,3 +547,124 @@ pub struct ConfigView {
 pub fn code(e: vault::error::VaultError) -> String {
     format!("Custom({})", e as u32)
 }
+
+// ---------------------------------------------------------------------------
+// $VEXA and staking
+// ---------------------------------------------------------------------------
+
+pub fn stake_pda(owner: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[vault::stake::STAKE_SEED, owner.as_ref()], &vault::ID).0
+}
+
+impl Env {
+    /// Creates a $VEXA mint and sets the launch fee (0.10%, 5 USDC cap) with
+    /// the brief's tiers: 10/25/50/75% off at 1k/10k/100k/1M $VEXA.
+    pub fn launch_vexa(&mut self) -> Pubkey {
+        let admin = self.admin.insecure_clone();
+        let mint = create_usdc_mint(&mut self.svm, &admin, &admin.pubkey());
+        let tiers = [
+            (1_000 * USDC, 1_000),
+            (10_000 * USDC, 2_500),
+            (100_000 * USDC, 5_000),
+            (1_000_000 * USDC, 7_500),
+        ];
+        let ix = set_fees_ix(&admin.pubkey(), &self.treasury, 10, 5 * USDC, Some(mint), &tiers);
+        self.send(&[ix], &admin, &[]).unwrap();
+        mint
+    }
+
+    /// Mints `amount` $VEXA to the user's wallet; returns their $VEXA account.
+    pub fn give_vexa(&mut self, mint: &Pubkey, user: &User, amount: u64) -> Pubkey {
+        let admin = self.admin.insecure_clone();
+        let ata = get_associated_token_address_with_program_id(
+            &user.kp.pubkey(),
+            mint,
+            &spl_token_interface::id(),
+        );
+        let ixs = [
+            spl_associated_token_account_interface::instruction::create_associated_token_account_idempotent(
+                &admin.pubkey(),
+                &user.kp.pubkey(),
+                mint,
+                &spl_token_interface::id(),
+            ),
+            spl_token_interface::instruction::mint_to(
+                &spl_token_interface::id(),
+                mint,
+                &ata,
+                &admin.pubkey(),
+                &[],
+                amount,
+            )
+            .unwrap(),
+        ];
+        self.send(&ixs, &admin, &[]).unwrap();
+        ata
+    }
+
+    pub fn stake_vault(&self, mint: &Pubkey) -> Pubkey {
+        get_associated_token_address_with_program_id(&self.config, mint, &spl_token_interface::id())
+    }
+
+    pub fn stake_ix(&self, mint: &Pubkey, user: &User, payer: &Pubkey, amount: u64) -> Instruction {
+        let owner_vexa = get_associated_token_address_with_program_id(
+            &user.kp.pubkey(),
+            mint,
+            &spl_token_interface::id(),
+        );
+        vault_ix(
+            vault::instruction::VaultInstruction::Stake,
+            &amount.to_le_bytes(),
+            vec![
+                AccountMeta::new_readonly(user.kp.pubkey(), true),
+                AccountMeta::new(*payer, true),
+                AccountMeta::new_readonly(self.config, false),
+                AccountMeta::new_readonly(self.fees, false),
+                AccountMeta::new_readonly(*mint, false),
+                AccountMeta::new(owner_vexa, false),
+                AccountMeta::new(self.stake_vault(mint), false),
+                AccountMeta::new(stake_pda(&user.kp.pubkey()), false),
+                AccountMeta::new_readonly(spl_token_interface::id(), false),
+                AccountMeta::new_readonly(
+                    spl_associated_token_account_interface::program::id(),
+                    false,
+                ),
+                AccountMeta::new_readonly(system_program::ID, false),
+            ],
+        )
+    }
+
+    pub fn unstake_ix(&self, mint: &Pubkey, user: &User, amount: u64) -> Instruction {
+        let owner_vexa = get_associated_token_address_with_program_id(
+            &user.kp.pubkey(),
+            mint,
+            &spl_token_interface::id(),
+        );
+        vault_ix(
+            vault::instruction::VaultInstruction::Unstake,
+            &amount.to_le_bytes(),
+            vec![
+                AccountMeta::new_readonly(user.kp.pubkey(), true),
+                AccountMeta::new_readonly(self.config, false),
+                AccountMeta::new_readonly(*mint, false),
+                AccountMeta::new(self.stake_vault(mint), false),
+                AccountMeta::new(stake_pda(&user.kp.pubkey()), false),
+                AccountMeta::new(owner_vexa, false),
+                AccountMeta::new_readonly(spl_token_interface::id(), false),
+            ],
+        )
+    }
+
+    pub fn staked(&self, owner: &Pubkey) -> u64 {
+        let data = self.svm.get_account(&stake_pda(owner)).unwrap().data;
+        u64::from_le_bytes(data[66..74].try_into().unwrap())
+    }
+
+    /// Moves the cluster clock forward.
+    pub fn warp(&mut self, seconds: i64) {
+        let mut clock = self.svm.get_sysvar::<solana_clock::Clock>();
+        clock.unix_timestamp += seconds;
+        clock.slot += 1;
+        self.svm.set_sysvar::<solana_clock::Clock>(&clock);
+    }
+}

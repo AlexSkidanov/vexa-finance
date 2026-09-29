@@ -1,6 +1,6 @@
 [package]
 name = "vexa-vault"
-version = "0.3.0"
+version = "0.4.0"
 description = "Wraps USDC 1:1 into cUSDC, a Token-2022 mint with confidential transfers"
 edition.workspace = true
 rust-version.workspace = true
@@ -31,6 +31,7 @@ solana-signer = "3.0.1"
 solana-keypair = "3.1.2"
 solana-instruction = "3.5"
 solana-pubkey = "3"
+solana-clock = "3"
 solana-system-interface = { version = "2", features = ["bincode"] }
 bytemuck = "1"
 spl-token-2022-interface = "2.1.0"

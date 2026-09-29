@@ -43,6 +43,12 @@ pub enum VaultError {
     InvalidFeeSchedule = 17,
     /// The amount doesn't cover the fee.
     AmountBelowFee = 18,
+    /// The staked $VEXA is still locked.
+    StakeLocked = 19,
+    /// No $VEXA mint is configured yet.
+    VexaNotSet = 20,
+    /// Unstaking more than is staked.
+    InsufficientStake = 21,
 }
 
 impl From<VaultError> for ProgramError {

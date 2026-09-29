@@ -14,7 +14,8 @@
 //!   8. `[]`         Token-2022 program
 //!   9. `[]`         fee schedule PDA `["fees"]`
 //!  10. `[writable]` treasury USDC account, as recorded in the fee schedule
-//!  11. `[]`         optional: owner's $VEXA token account, for a fee discount
+//!  11. `[]`         optional: owner's $VEXA token account and/or stake record,
+//!      up to two in either order, for a fee discount
 //!
 //! Data: `amount: u64`, the cUSDC burned. The destination receives it less
 //! the fee.
@@ -23,7 +24,7 @@ use pinocchio::{cpi::Signer, error::ProgramError, AccountView, ProgramResult};
 
 use super::{
     config_seeds, require_config_match, require_program, require_signer, require_token_account,
-    vexa_balance,
+    vexa_weight,
 };
 use crate::{
     error::VaultError,
@@ -65,8 +66,7 @@ pub fn process(accounts: &mut [AccountView], args: &[u8]) -> ProgramResult {
 
     let schedule = FeeSchedule::load(fees)?;
     require_config_match(treasury, &schedule.treasury())?;
-    let fee =
-        schedule.fee(amount, vexa_balance(rest.first(), &schedule.vexa_mint(), owner.address())?);
+    let fee = schedule.fee(amount, vexa_weight(rest, &schedule.vexa_mint(), owner.address())?);
     let net = amount.checked_sub(fee).filter(|n| *n > 0).ok_or(VaultError::AmountBelowFee)?;
 
     let decimals = token::read_mint(&usdc_mint.try_borrow()?)?.decimals;

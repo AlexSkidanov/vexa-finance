@@ -2,6 +2,7 @@ pub mod admin;
 pub mod configure;
 pub mod deposit;
 pub mod initialize;
+pub mod stake;
 pub mod withdraw;
 
 use pinocchio::{
@@ -115,20 +116,37 @@ pub(crate) fn create_pda_account(
     Assign { account, owner: &ID }.invoke_signed(signers)
 }
 
-/// The owner's $VEXA balance, read from an optional account that must be
-/// theirs and of the configured mint. No account, or no $VEXA mint set,
-/// means a balance of zero: discounts are opt-in, never a way to fail.
-pub(crate) fn vexa_balance(
-    account: Option<&AccountView>,
+/// The owner's $VEXA weight for fee discounts: staked $VEXA in full plus
+/// wallet $VEXA at half, read from up to two optional trailing accounts (a
+/// stake record and a $VEXA token account, in either order, told apart by
+/// their owning program). Both must be the owner's and of the configured
+/// mint. Presenting neither, or no mint being set, means a weight of zero:
+/// discounts are opt-in, never a way to fail.
+pub(crate) fn vexa_weight(
+    rest: &[AccountView],
     vexa_mint: &Address,
     owner: &Address,
 ) -> Result<u64, ProgramError> {
-    let Some(account) = account else { return Ok(0) };
     if vexa_mint == &Address::default() {
         return Ok(0);
     }
-    let program =
-        if account.owned_by(&TOKEN_PROGRAM_ID) { TOKEN_PROGRAM_ID } else { TOKEN_2022_PROGRAM_ID };
-    require_token_account(account, &program, vexa_mint, Some(owner))?;
-    crate::token::read_token_amount(&account.try_borrow()?)
+    let (mut staked, mut held) = (0u64, 0u64);
+    for account in rest.iter().take(2) {
+        if account.owned_by(&ID) {
+            let stake = crate::stake::Stake::load(account)?;
+            if stake.owner() != *owner || stake.vexa_mint() != *vexa_mint {
+                return Err(VaultError::TokenOwnerMismatch.into());
+            }
+            staked = stake.amount();
+        } else {
+            let program = if account.owned_by(&TOKEN_PROGRAM_ID) {
+                TOKEN_PROGRAM_ID
+            } else {
+                TOKEN_2022_PROGRAM_ID
+            };
+            require_token_account(account, &program, vexa_mint, Some(owner))?;
+            held = crate::token::read_token_amount(&account.try_borrow()?)?;
+        }
+    }
+    Ok(staked.saturating_add(held / 2))
 }
