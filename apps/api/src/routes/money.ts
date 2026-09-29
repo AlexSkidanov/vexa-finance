@@ -33,6 +33,7 @@ import {
 } from '@vexa/core/solana';
 import { ApiError, notFound } from '../errors.js';
 import type { AppBindings } from '../context.js';
+import type { TransferRow } from '../store/types.js';
 import { authenticate, principalOf } from '../middleware/auth.js';
 import { idempotent } from '../middleware/idempotency.js';
 import { parseBody } from '../lib/validate.js';
@@ -447,7 +448,7 @@ export const money = new Hono<AppBindings>()
     });
   });
 
-function transferJson(t: import('../store/types.js').TransferRow, direction: 'sent' | 'received') {
+function transferJson(t: TransferRow, direction: 'sent' | 'received') {
   return {
     id: t.id,
     direction,
