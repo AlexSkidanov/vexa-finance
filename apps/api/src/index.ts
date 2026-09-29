@@ -16,7 +16,7 @@ import {
   ZK_ELGAMAL_PROOF_PROGRAM,
 } from '@vexa/core/solana';
 import { address } from '@solana/kit';
-import { findAta, findVaultConfig, TOKEN_PROGRAM } from '@vexa/core/solana';
+import { findAta, findFeeSchedule, findVaultConfig, TOKEN_PROGRAM } from '@vexa/core/solana';
 
 const env = loadEnv();
 const logger = createLogger(env.LOG_LEVEL, env.NODE_ENV === 'development');
@@ -30,6 +30,7 @@ const vault = {
   usdcMint: address(env.USDC_MINT),
   cusdcMint: address(env.CUSDC_MINT),
   usdcReserve: await findAta(config, address(env.USDC_MINT), TOKEN_PROGRAM),
+  fees: await findFeeSchedule(vaultProgram),
 };
 const chain = await createRpcChain({
   rpcUrl: env.ALCHEMY_SOLANA_RPC_URL,
@@ -72,6 +73,7 @@ const stopIndexer = startIndexer({
     vault.usdcMint,
     vault.cusdcMint,
     vault.usdcReserve,
+    vault.fees,
     TOKEN_PROGRAM,
     TOKEN_2022_PROGRAM,
     ASSOCIATED_TOKEN_PROGRAM,

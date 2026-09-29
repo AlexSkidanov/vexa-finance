@@ -8,7 +8,7 @@
  * validity proof.
  */
 import { Hono, type Context } from 'hono';
-import { address, getAddressEncoder } from '@solana/kit';
+import { address, getAddressEncoder, type Address } from '@solana/kit';
 import {
   base64Decode,
   base64Encode,
@@ -24,6 +24,8 @@ import {
 import {
   decodeConfidentialAccount,
   decodeConfidentialMint,
+  decodeFeeSchedule,
+  feeDiscountBps,
   findAta,
   ProofType,
   TOKEN_2022_PROGRAM,
@@ -63,6 +65,27 @@ async function owner(c: C) {
     cusdc: await findAta(wallet, vault.cusdcMint, TOKEN_2022_PROGRAM),
     usdc: await findAta(wallet, vault.usdcMint, TOKEN_PROGRAM),
   };
+}
+
+async function feeSchedule(c: C) {
+  const { chain, vault } = c.get('deps');
+  const data = await chain.getAccountData(vault.fees);
+  return data ? decodeFeeSchedule(data) : null;
+}
+
+/** The discount a user's $VEXA (a classic SPL token account) earns them. */
+async function vexaDiscount(
+  c: C,
+  wallet: Address,
+  fees: Awaited<ReturnType<typeof feeSchedule>>,
+): Promise<{ vexaAccount: Address; discountBps: number } | null> {
+  if (!fees?.vexaMint || fees.tiers.length === 0) return null;
+  const vexaAccount = await findAta(wallet, fees.vexaMint, TOKEN_PROGRAM);
+  const data = await c.get('deps').chain.getAccountData(vexaAccount);
+  if (!data || data.length < 72) return null;
+  const balance = new DataView(data.buffer, data.byteOffset).getBigUint64(64, true);
+  const discountBps = feeDiscountBps(fees, balance);
+  return discountBps > 0 ? { vexaAccount, discountBps } : null;
 }
 
 async function sponsorContext(
@@ -171,10 +194,11 @@ export const money = new Hono<AppBindings>()
   /** Everything a device needs to build plans: fee payer, vault accounts, rent, a blockhash. */
   .get('/chain', authenticate(), async (c) => {
     const { chain, vault, env } = c.get('deps');
-    const [rent, latest, mint] = await Promise.all([
+    const [rent, latest, mint, fees] = await Promise.all([
       chain.getRentTable(),
       chain.getLatestBlockhash(),
       chain.getAccountData(vault.cusdcMint),
+      feeSchedule(c),
     ]);
     const auditor = mint ? decodeConfidentialMint(mint)?.auditorElgamalPubkey : null;
     return c.json({
@@ -186,6 +210,17 @@ export const money = new Hono<AppBindings>()
         usdcMint: vault.usdcMint,
         cusdcMint: vault.cusdcMint,
         usdcReserve: vault.usdcReserve,
+        fees: vault.fees,
+      },
+      feeSchedule: fees && {
+        feeBps: fees.feeBps,
+        feeCap: fees.feeCap.toString(),
+        treasury: fees.treasury,
+        vexaMint: fees.vexaMint,
+        tiers: fees.tiers.map((t) => ({
+          minBalance: t.minBalance.toString(),
+          discountBps: t.discountBps,
+        })),
       },
       auditorElgamalPubkey: auditor ? base64Encode(auditor) : null,
       rent: Object.fromEntries(
@@ -199,15 +234,18 @@ export const money = new Hono<AppBindings>()
   /**
    * The user's cUSDC balance as ciphertexts. Decrypt on the device with
    * @vexa/core/crypto: `decryptPendingBalance` for pending, the AE key for
-   * available.
+   * available. Also the fee discount their $VEXA earns, if any: the account
+   * to present to the vault and the tier's discount, never the balance.
    */
   .get('/balance', authenticate(), async (c) => {
     const me = await owner(c);
-    const data = await c.get('deps').chain.getAccountData(me.cusdc);
+    const { chain } = c.get('deps');
+    const [data, fees] = await Promise.all([chain.getAccountData(me.cusdc), feeSchedule(c)]);
     const state = data ? decodeConfidentialAccount(data) : null;
     return c.json({
       cusdcAccount: me.cusdc,
       usdcAccount: me.usdc,
+      feeDiscount: await vexaDiscount(c, me.wallet, fees),
       configured: state !== null,
       confidential: state && {
         pendingBalanceLo: base64Encode(state.pendingBalanceLo),

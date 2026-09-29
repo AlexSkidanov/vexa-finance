@@ -88,6 +88,7 @@ export const TEST_VAULT = {
   usdcMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
   cusdcMint: '4STXpFN2mQSt12XG4os7ftLXHbBq5PVWYCAahToRt6QQ',
   usdcReserve: '8eeishQYvtHwwM8QRN9629zzU9hBn18dGFW5T75ytqz6',
+  fees: '4PAtQdQRVfozc2F8x4eJF1oHhAQ6EMfX5EqBgPGnj29u',
 } as VaultAddresses;
 
 export function testApp(overrides: Partial<Deps> = {}) {

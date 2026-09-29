@@ -103,14 +103,22 @@ describe.skipIf(!vaultBinaryExists())('money over HTTP, on LiteSVM', { timeout: 
     const bob = await person('bob', 0n);
     const feePayerStart = bed.svm.getBalance(bed.feePayer.address)!;
 
-    await alice.vexa.money.deposit(50n * USDC, alice.wallet.keys);
-    expect((await alice.vexa.money.balance(alice.wallet.keys)).available).toBe(50n * USDC);
+    // The SDK quotes the vault's fee up front and books what actually lands.
+    expect(await alice.vexa.money.quote(50n * USDC)).toEqual({
+      fee: 50_000n,
+      net: 49_950_000n,
+      discountBps: 0,
+    });
+    const deposit = await alice.vexa.money.deposit(50n * USDC, alice.wallet.keys);
+    expect(deposit.fee).toBe(50_000n);
+    expect((await alice.vexa.money.balance(alice.wallet.keys)).available).toBe(49_950_000n);
+    expect(bed.tokenAmount(bed.vault.treasury)).toBe(50_000n);
 
     await alice.vexa.money.transfer(
       { to: '@bob.vexa', amount: 12_500_000n, memo: 'dinner 🍜' },
       alice.wallet.keys,
     );
-    expect((await alice.vexa.money.balance(alice.wallet.keys)).available).toBe(37_500_000n);
+    expect((await alice.vexa.money.balance(alice.wallet.keys)).available).toBe(37_450_000n);
     expect((await bob.vexa.money.balance(bob.wallet.keys)).pending).toBe(12_500_000n);
 
     // Both sides see the amount and memo, decrypted on their own device.
@@ -153,7 +161,8 @@ describe.skipIf(!vaultBinaryExists())('money over HTTP, on LiteSVM', { timeout: 
       }),
     ]);
     await alice.vexa.money.withdraw({ amount: 10n * USDC, to: outside.address }, alice.wallet.keys);
-    expect(bed.tokenAmount(destination)).toBe(10n * USDC);
+    expect(bed.tokenAmount(destination)).toBe(9_990_000n);
+    expect(bed.tokenAmount(bed.vault.treasury)).toBe(60_000n);
 
     // Reserve covers supply exactly.
     const mint = bed.account(bed.vault.cusdcMint)!;
@@ -230,7 +239,7 @@ describe.skipIf(!vaultBinaryExists())('money over HTTP, on LiteSVM', { timeout: 
     });
     expect(res.status).toBe(400);
     expect((await res.json()).error.code).toBe('plan_refused');
-    expect((await carol.vexa.money.balance(carol.wallet.keys)).available).toBe(20n * USDC);
+    expect((await carol.vexa.money.balance(carol.wallet.keys)).available).toBe(19_980_000n);
   });
 
   it('won’t submit the same transfer twice', async () => {

@@ -33,6 +33,8 @@ export interface VaultAddresses {
   usdcMint: Address;
   cusdcMint: Address;
   usdcReserve: Address;
+  /** The fee schedule PDA. */
+  fees: Address;
 }
 
 export type AppBindings = {

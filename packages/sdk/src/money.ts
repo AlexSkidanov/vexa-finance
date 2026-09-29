@@ -28,9 +28,11 @@ import {
   configurePlan,
   depositPlan,
   findAta,
+  quoteFee,
   TOKEN_PROGRAM,
   transferPlan,
   withdrawPlan,
+  type FeeSchedule,
   type Plan,
   type RentTable,
 } from '@vexa/core/solana';
@@ -41,6 +43,7 @@ type Call = <T>(method: string, path: string, opts?: RequestOptions) => Promise<
 interface BalanceResponse {
   cusdcAccount: string;
   usdcAccount: string;
+  feeDiscount: { vexaAccount: string; discountBps: number } | null;
   configured: boolean;
   confidential: {
     pendingBalanceLo: string;
@@ -98,6 +101,28 @@ function rentTable(ctx: ChainContext): RentTable {
   };
 }
 
+function feeSchedule(ctx: ChainContext): FeeSchedule {
+  const s = ctx.feeSchedule;
+  if (!s) throw new Error('the vault has no fee schedule yet, so it is not accepting money');
+  return {
+    feeBps: s.feeBps,
+    feeCap: BigInt(s.feeCap),
+    treasury: address(s.treasury),
+    vexaMint: s.vexaMint ? address(s.vexaMint) : null,
+    tiers: s.tiers.map((t) => ({ minBalance: BigInt(t.minBalance), discountBps: t.discountBps })),
+  };
+}
+
+/** What the vault will take from a deposit or withdrawal, and what's left. */
+export interface FeeQuote {
+  /** USDC base units to the treasury. */
+  fee: bigint;
+  /** Deposit: what lands in the confidential balance. Withdraw: what the destination receives. */
+  net: bigint;
+  /** The $VEXA discount applied, in basis points of the fee. */
+  discountBps: number;
+}
+
 export class Money {
   constructor(private readonly call: Call) {}
 
@@ -120,7 +145,25 @@ export class Money {
       usdcMint: address(ctx.vault.usdcMint),
       cusdcMint: address(ctx.vault.cusdcMint),
       usdcReserve: address(ctx.vault.usdcReserve),
+      fees: address(ctx.vault.fees),
+      treasury: feeSchedule(ctx).treasury,
     };
+  }
+
+  private feeQuote(ctx: ChainContext, raw: BalanceResponse, amount: bigint): FeeQuote {
+    const discountBps = raw.feeDiscount?.discountBps ?? 0;
+    const fee = quoteFee(feeSchedule(ctx), amount, { discountBps });
+    return { fee, net: amount - fee, discountBps };
+  }
+
+  /**
+   * The fee on a deposit or withdrawal of `amount`, exactly as the vault
+   * will compute it: 0.10% at launch, capped, less any $VEXA discount.
+   * Transfers between Vexa users are free.
+   */
+  async quote(amount: bigint): Promise<FeeQuote> {
+    const [ctx, raw] = await Promise.all([this.chain(), this.raw()]);
+    return this.feeQuote(ctx, raw, amount);
   }
 
   private async raw(): Promise<BalanceResponse> {
@@ -178,11 +221,16 @@ export class Money {
    * confidential balance. Deposits are public on-chain, like any USDC
    * transfer; from here on the balance is encrypted.
    */
-  async deposit(amount: bigint, keys: UserKeys): Promise<{ id: string; txSig: string | null }> {
+  async deposit(
+    amount: bigint,
+    keys: UserKeys,
+  ): Promise<{ id: string; txSig: string | null } & FeeQuote> {
     const [ctx, raw] = await Promise.all([this.chain(), this.raw()]);
     if (!raw.configured || !raw.confidential)
       throw new Error('open the account first: money.openAccount()');
     const { available, pending } = this.decrypt(raw, keys);
+    const quote = this.feeQuote(ctx, raw, amount);
+    if (quote.net <= 0n) throw new Error('amount does not cover the fee');
     const owner = await createKeyPairSignerFromPrivateKeyBytes(keys.solanaSeed);
     const plan = depositPlan({
       vault: this.vault(ctx),
@@ -190,15 +238,17 @@ export class Money {
       ownerUsdc: address(raw.usdcAccount),
       ownerCusdc: address(raw.cusdcAccount),
       amount,
+      vexaAccount: raw.feeDiscount ? address(raw.feeDiscount.vexaAccount) : undefined,
       expectedPendingBalanceCreditCounter:
         BigInt(raw.confidential.pendingBalanceCreditCounter) + 1n,
-      // Deposit and apply in one go: available + everything pending + this deposit.
-      newDecryptableAvailableBalance: keys.ae.encrypt(available + pending + amount).toBytes(),
+      // Deposit and apply in one go: available + everything pending + what lands.
+      newDecryptableAvailableBalance: keys.ae.encrypt(available + pending + quote.net).toBytes(),
     });
-    return this.call('POST', '/v1/deposits', {
+    const res = await this.call<{ id: string; txSig: string | null }>('POST', '/v1/deposits', {
       body: { plan: await this.compile(plan, ctx) },
       idempotencyKey: true,
     });
+    return { ...res, ...quote };
   }
 
   /** Makes received funds spendable. Does nothing when nothing is pending. */
@@ -293,11 +343,13 @@ export class Money {
   async withdraw(
     input: { amount: bigint; to: string },
     keys: UserKeys,
-  ): Promise<{ id: string; txSig: string | null }> {
+  ): Promise<{ id: string; txSig: string | null } & FeeQuote> {
     const [ctx, raw] = await Promise.all([this.chain(), this.raw()]);
     if (!raw.confidential) throw new Error('open the account first: money.openAccount()');
     const { available } = this.decrypt(raw, keys);
     if (available < input.amount) throw new Error('insufficient confidential balance');
+    const quote = this.feeQuote(ctx, raw, input.amount);
+    if (quote.net <= 0n) throw new Error('amount does not cover the fee');
 
     const wallet: Address = address(input.to);
     const destination = await findAta(wallet, address(ctx.vault.usdcMint), TOKEN_PROGRAM);
@@ -308,6 +360,7 @@ export class Money {
       ownerCusdc: address(raw.cusdcAccount),
       destination,
       amount: input.amount,
+      vexaAccount: raw.feeDiscount ? address(raw.feeDiscount.vexaAccount) : undefined,
       decimals: 6,
       proofs: buildWithdrawProofs({
         elgamal: keys.elgamal,
@@ -318,10 +371,11 @@ export class Money {
       }),
       rent: rentTable(ctx),
     });
-    return this.call('POST', '/v1/withdrawals', {
+    const res = await this.call<{ id: string; txSig: string | null }>('POST', '/v1/withdrawals', {
       body: { plan: await this.compile(plan, ctx), destinationAccount: destination },
       idempotencyKey: true,
     });
+    return { ...res, ...quote };
   }
 
   /** Activity with transfer amounts and memos decrypted on this device. */

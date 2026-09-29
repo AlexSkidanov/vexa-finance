@@ -36,7 +36,7 @@ export {
   type WebhookEventType,
   type WebhookVerification,
 } from '@vexa/core';
-export type { ActivityMovement, ActivityTransfer, Balance } from './money.js';
+export type { ActivityMovement, ActivityTransfer, Balance, FeeQuote } from './money.js';
 export type { ApiKeySummary, CreatedApiKey, HandleResolution, Profile, Session };
 
 export const DEFAULT_BASE_URLS: Record<ApiEnvironment, string> = {
