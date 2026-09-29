@@ -142,6 +142,26 @@ export interface AgentTraceRow {
   createdAt: Date;
 }
 
+export interface ViewKeyRow {
+  id: string;
+  ownerId: string;
+  label: string | null;
+  scopeFrom: Date;
+  scopeTo: Date;
+  revokedAt: Date | null;
+  createdAt: Date;
+}
+
+/** One exported row: public transfer metadata and the owner-encrypted record. */
+export interface AuditRow {
+  transferId: string;
+  createdAt: Date;
+  direction: 'sent' | 'received';
+  counterparty: string;
+  txSig: string | null;
+  record: Uint8Array;
+}
+
 export interface EventRow {
   id: string;
   ownerId: string;
@@ -307,6 +327,33 @@ export interface Store {
       detail: Record<string, unknown>;
     }): Promise<AgentTraceRow>;
     traces(agentId: string, opts: { limit: number; requestId?: string }): Promise<AgentTraceRow[]>;
+  };
+
+  viewKeys: {
+    create(input: {
+      id: string;
+      ownerId: string;
+      label: string | null;
+      scopeFrom: Date;
+      scopeTo: Date;
+      accessHash: string;
+    }): Promise<ViewKeyRow>;
+    list(ownerId: string): Promise<ViewKeyRow[]>;
+    get(ownerId: string, id: string): Promise<ViewKeyRow | null>;
+    /** Revokes the key and deletes its records. False if it wasn't theirs or was already revoked. */
+    revoke(ownerId: string, id: string): Promise<boolean>;
+    recordedTransferIds(id: string): Promise<string[]>;
+    /**
+     * Stores records for transfers the key's owner sent or received within its
+     * scope; ignores anything else, and transfers already recorded.
+     */
+    addRecords(
+      key: ViewKeyRow,
+      records: { transferId: string; record: Uint8Array }[],
+    ): Promise<number>;
+    /** An unrevoked key by the hash of its access secret. */
+    byAccessHash(hash: string): Promise<ViewKeyRow | null>;
+    exportRows(key: ViewKeyRow): Promise<AuditRow[]>;
   };
 
   events: {

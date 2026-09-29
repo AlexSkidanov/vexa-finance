@@ -26,6 +26,7 @@ import { request, VexaError, type HttpOptions, type RequestOptions } from './htt
 import { createPasskey, getPasskeyAssertion } from './passkeys.js';
 import { Money } from './money.js';
 import { Agents } from './agents.js';
+import { ViewKeys } from './view-keys.js';
 import { DEFAULT_BASE_URLS } from './base-urls.js';
 
 export { VexaError };
@@ -40,6 +41,7 @@ export {
 } from '@vexa/core';
 export type { ActivityMovement, ActivityTransfer, Balance, FeeQuote, TierInfo } from './money.js';
 export type { AgentPolicyInput, AgentState, AgentSummary, AgentsConfig } from './agents.js';
+export { exportAudit, type AuditRow, type ViewKeySummary } from './view-keys.js';
 export {
   parseX402Payment,
   VexaAgent,
@@ -243,6 +245,12 @@ export class Vexa {
 
   /** Your agents: create, limit, fund, pause, revoke, sweep. */
   readonly agents: Agents = new Agents((method, path, opts) => this.call(method, path, opts));
+
+  /** View keys for auditors. */
+  readonly viewKeys: ViewKeys = new ViewKeys(
+    (method, path, opts) => this.call(method, path, opts),
+    this.money,
+  );
 
   me(): Promise<Profile> {
     return this.call<Profile>('GET', '/v1/me');

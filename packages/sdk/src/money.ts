@@ -455,11 +455,13 @@ export class Money {
   /** Activity with transfer amounts and memos decrypted on this device. */
   async activity(
     keys: UserKeys,
-    opts: { limit?: number } = {},
+    opts: { limit?: number; before?: string } = {},
   ): Promise<(ActivityTransfer | ActivityMovement)[]> {
+    const q = new URLSearchParams({ limit: String(opts.limit ?? 50) });
+    if (opts.before) q.set('before', opts.before);
     const { data } = await this.call<{ data: Record<string, unknown>[] }>(
       'GET',
-      `/v1/activity?limit=${opts.limit ?? 50}`,
+      `/v1/activity?${q}`,
     );
     const secret = keys.elgamal.secret();
     return data.map((item) => {

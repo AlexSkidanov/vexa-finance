@@ -4,6 +4,8 @@ import {
   type ActivityItem,
   type AgentRow,
   type AgentTraceRow,
+  type AuditRow,
+  type ViewKeyRow,
   type EventRow,
   type MovementRow,
   type DueDelivery,
@@ -40,6 +42,8 @@ export function createMemoryStore(): Store {
   const agents = new Map<string, AgentRow>();
   const agentPayments: { transferId: string; agentId: string; index: number }[] = [];
   const traces: AgentTraceRow[] = [];
+  const viewKeys = new Map<string, ViewKeyRow & { accessHash: string }>();
+  const viewRecords = new Map<string, Map<string, Uint8Array>>();
   const deposits: MovementRow[] = [];
   const withdrawals: MovementRow[] = [];
   const events: EventRow[] = [];
@@ -349,6 +353,66 @@ export function createMemoryStore(): Store {
           .filter((t) => t.agentId === agentId && (!requestId || t.requestId === requestId))
           .reverse()
           .slice(0, limit);
+      },
+    },
+
+    viewKeys: {
+      async create(v) {
+        const row = { ...v, revokedAt: null, createdAt: new Date() };
+        viewKeys.set(v.id, row);
+        viewRecords.set(v.id, new Map());
+        return row;
+      },
+      async list(ownerId) {
+        return [...viewKeys.values()].filter((v) => v.ownerId === ownerId);
+      },
+      async get(ownerId, id) {
+        const v = viewKeys.get(id);
+        return v && v.ownerId === ownerId ? v : null;
+      },
+      async revoke(ownerId, id) {
+        const v = viewKeys.get(id);
+        if (!v || v.ownerId !== ownerId || v.revokedAt) return false;
+        v.revokedAt = new Date();
+        viewRecords.get(id)?.clear();
+        return true;
+      },
+      async recordedTransferIds(id) {
+        return [...(viewRecords.get(id)?.keys() ?? [])];
+      },
+      async addRecords(key, records) {
+        const map = viewRecords.get(key.id)!;
+        let added = 0;
+        for (const r of records) {
+          const t = transfers.get(r.transferId);
+          const mine = t && (t.fromOwnerId === key.ownerId || t.toOwnerId === key.ownerId);
+          const inScope = t && t.createdAt >= key.scopeFrom && t.createdAt < key.scopeTo;
+          if (mine && inScope && !map.has(r.transferId)) {
+            map.set(r.transferId, r.record);
+            added++;
+          }
+        }
+        return added;
+      },
+      async byAccessHash(hash) {
+        return [...viewKeys.values()].find((v) => v.accessHash === hash && !v.revokedAt) ?? null;
+      },
+      async exportRows(key) {
+        const rows: AuditRow[] = [];
+        for (const [transferId, record] of viewRecords.get(key.id) ?? []) {
+          const t = transfers.get(transferId);
+          if (!t || t.createdAt < key.scopeFrom || t.createdAt >= key.scopeTo) continue;
+          const sent = t.fromOwnerId === key.ownerId;
+          rows.push({
+            transferId,
+            createdAt: t.createdAt,
+            direction: sent ? 'sent' : 'received',
+            counterparty: sent ? (t.toHandle ?? t.toPubkey) : t.fromPubkey,
+            txSig: t.txSig,
+            record,
+          });
+        }
+        return rows.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
       },
     },
 

@@ -4,6 +4,7 @@ import {
   type ActivityItem,
   type AgentRow,
   type AgentTraceRow,
+  type ViewKeyRow,
   type PolicyRow,
   type EventRow,
   type MovementRow,
@@ -111,6 +112,16 @@ export function createPostgresStore(url: string): Store & { close(): Promise<voi
     requestId: r.request_id,
     step: r.step,
     detail: r.detail ?? {},
+    createdAt: r.created_at,
+  });
+
+  const toViewKey = (r: postgres.Row): ViewKeyRow => ({
+    id: r.id,
+    ownerId: r.owner_id,
+    label: r.label,
+    scopeFrom: r.scope_from,
+    scopeTo: r.scope_to,
+    revokedAt: r.revoked_at,
     createdAt: r.created_at,
   });
 
@@ -460,6 +471,84 @@ export function createPostgresStore(url: string): Store & { close(): Promise<voi
           where agent_id = ${agentId} ${requestId ? sql`and request_id = ${requestId}` : sql``}
           order by created_at desc limit ${limit}`;
         return rows.map(toTrace);
+      },
+    },
+
+    viewKeys: {
+      async create(v) {
+        const [row] = await sql`
+          insert into public.view_keys (id, owner_id, label, scope_from, scope_to, access_hash)
+          values (${v.id}, ${v.ownerId}, ${v.label}, ${v.scopeFrom}, ${v.scopeTo}, ${v.accessHash})
+          returning *`;
+        return toViewKey(row!);
+      },
+      async list(ownerId) {
+        const rows = await sql`
+          select * from public.view_keys where owner_id = ${ownerId} order by created_at desc`;
+        return rows.map(toViewKey);
+      },
+      async get(ownerId, id) {
+        const [row] = await sql`
+          select * from public.view_keys where id = ${id} and owner_id = ${ownerId}`;
+        return row ? toViewKey(row) : null;
+      },
+      async revoke(ownerId, id) {
+        return sql.begin(async (tx) => {
+          const rows = await tx`
+            update public.view_keys set revoked_at = now()
+            where id = ${id} and owner_id = ${ownerId} and revoked_at is null
+            returning id`;
+          if (rows.length === 0) return false;
+          await tx`delete from public.view_key_records where view_key_id = ${id}`;
+          return true;
+        });
+      },
+      async recordedTransferIds(id) {
+        const rows = await sql`
+          select transfer_id from public.view_key_records where view_key_id = ${id}`;
+        return rows.map((r) => r.transfer_id as string);
+      },
+      async addRecords(key, records) {
+        let added = 0;
+        for (const r of records) {
+          const rows = await sql`
+            insert into public.view_key_records (view_key_id, transfer_id, record)
+            select ${key.id}, t.id, ${Buffer.from(r.record)}
+            from public.transfers t
+            where t.id = ${r.transferId}
+              and (t.from_owner_id = ${key.ownerId} or t.to_owner_id = ${key.ownerId})
+              and t.created_at >= ${key.scopeFrom} and t.created_at < ${key.scopeTo}
+            on conflict do nothing
+            returning transfer_id`;
+          added += rows.length;
+        }
+        return added;
+      },
+      async byAccessHash(hash) {
+        const [row] = await sql`
+          select * from public.view_keys where access_hash = ${hash} and revoked_at is null`;
+        return row ? toViewKey(row) : null;
+      },
+      async exportRows(key) {
+        const rows = await sql`
+          select t.id, t.created_at, t.from_owner_id, t.from_pubkey, t.to_handle, t.to_pubkey,
+                 t.tx_sig, r.record
+          from public.view_key_records r
+          join public.transfers t on t.id = r.transfer_id
+          where r.view_key_id = ${key.id}
+            and t.created_at >= ${key.scopeFrom} and t.created_at < ${key.scopeTo}
+          order by t.created_at`;
+        return rows.map((r) => {
+          const sent = r.from_owner_id === key.ownerId;
+          return {
+            transferId: r.id,
+            createdAt: r.created_at,
+            direction: sent ? ('sent' as const) : ('received' as const),
+            counterparty: sent ? (r.to_handle ?? r.to_pubkey) : r.from_pubkey,
+            txSig: r.tx_sig,
+            record: new Uint8Array(r.record),
+          };
+        });
       },
     },
 

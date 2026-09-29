@@ -1,3 +1,4 @@
+import { audit, viewKeys } from './routes/view-keys.js';
 import { agents } from './routes/agents.js';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -54,6 +55,8 @@ export function createApp(deps: Deps) {
   app.route('/v1/webhooks', webhooks);
   app.route('/v1/hooks', hooks);
   app.route('/v1/agents', agents);
+  app.route('/v1/view-keys', viewKeys);
+  app.route('/v1/audit', audit);
   app.route('/v1', money);
 
   app.onError(onError);

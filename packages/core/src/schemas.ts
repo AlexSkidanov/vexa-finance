@@ -360,3 +360,28 @@ export const AgentTraceRequest = z.object({
     .default({}),
 });
 export type AgentTraceRequest = z.input<typeof AgentTraceRequest>;
+
+// ---------------------------------------------------------------------------
+// View keys
+// ---------------------------------------------------------------------------
+
+export const CreateViewKeyRequest = z
+  .object({
+    /** Chosen by the client: the view key derives from it. */
+    id: z.uuid(),
+    label: z.string().trim().min(1).max(64).optional(),
+    from: z.iso.datetime(),
+    to: z.iso.datetime(),
+    /** Hex SHA-256 of the key's access secret (see @vexa/core/crypto). */
+    accessHash: z.string().regex(/^[0-9a-f]{64}$/),
+  })
+  .refine((v) => new Date(v.from) < new Date(v.to), { message: 'from must be before to' });
+export type CreateViewKeyRequest = z.input<typeof CreateViewKeyRequest>;
+
+export const AddViewRecordsRequest = z.object({
+  records: z
+    .array(z.object({ transferId: z.uuid(), record: Base64.max(5600) }))
+    .min(1)
+    .max(200),
+});
+export type AddViewRecordsRequest = z.input<typeof AddViewRecordsRequest>;
