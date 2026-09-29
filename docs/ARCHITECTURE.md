@@ -201,16 +201,98 @@ What sponsorship costs Vexa: an account opening is 0.00303 SOL of rent (3,032,76
 
 Deposits are signed by users, so one can reach the vault without going through `POST /v1/deposits`. The Alchemy webhook watches the reserve; the indexer records any vault deposit it hasn't seen, attributing it to the registered wallet in the transaction, and emits `deposit.confirmed`. Notifications queue in `chain_events` and are retried with backoff before being parked as dead.
 
-## Planned
+## Agents
 
-### Agent accounts (Phase 3)
+An agent is a sub-account for software, with limits its owner sets. Three pieces cooperate, and none of them can overspend on its own.
 
-Each agent gets a Solana address derived by NEAR chain signatures (path `vexa-agent-{id}`). The agent's transactions are only signed by the MPC network after the `near-policy` contract checks them: a single confidential transfer from the agent's account, within the rolling 24-hour limit and the per-request cap, to an allowed recipient.
+- **Its Solana key is an MPC key.** The agent's address is NEAR `v1.signer`'s Ed25519 key derived for the policy contract and `vexa-agent-{id}` (`root + SHA3-256("near-mpc-recovery v0.1.0 epsilon derivation:" ‖ contract ‖ "," ‖ path)·G`). Nobody holds the private key; only the contract can ask for a signature.
+- **The policy contract** (`contracts/near-policy`) stores each agent's policy, authorized by the owner's Solana key, and signs only transactions of a known shape: open the account, apply pending, pay (within limits), or sweep to the owner.
+- **The vault's `RequireContexts`** makes the transaction that NEAR signed fail unless the proofs it approved are the ones on-chain.
 
-### Stealth transfers (Phase 3)
+### Limits on amounts nobody can see
 
-Funds go to a one-time address, are swapped through NEAR Intents 1Click from USDC to ZEC into a shielded address, then back to USDC at a fresh address for the recipient, and re-deposited. Every leg has a timeout and a refund path.
+A payment's amount is a Pedersen commitment `C = a·G + r·H`, carried in the transfer's validity proof as `C_lo + 2¹⁶·C_hi`. The agent adds a fourth proof, a range proof that
 
-### View keys (Phase 3)
+```text
+D_request = max_per_request·G − C          commits to  max_per_request − a  ≥ 0
+D_daily   = daily_limit·G − W − C          commits to  daily_limit − (spent + a)  ≥ 0
+```
 
-Transfers are also encrypted to the mint's auditor key. A view key is a wrapped, range-scoped grant that lets its holder decrypt those auditor ciphertexts for transfers inside the date range, and is revocable at any time.
+where `W` is the sum of the commitments of its payments in the last 24 hours, which the contract keeps. The contract recomputes both points from the validity proof's context and its window and requires them to equal the range proof's commitments. It never learns `a`; a negative remainder has no range proof. Solana verifies the proofs into context accounts, and `RequireContexts(sha256(validity), sha256(limit))` first in the payment transaction ties it to exactly those contexts, since context data can only be written by a successful verification.
+
+The daily proof needs the openings of past payments. The standard proof generator picks random ones, so agents use `crates/agent-proofs` (solana-zk-sdk 7, the version mainnet verifies with, compiled to WebAssembly): openings derive from the agent's secret and the payment index, the contract assigns each index once, and the agent can always recompute its window.
+
+### An agent paying for an API with x402
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant G as Agent (VexaAgent)
+  participant M as Merchant API
+  participant A as Vexa API
+  participant N as NEAR policy contract
+  participant P as NEAR MPC (v1.signer)
+  participant S as Solana
+
+  G->>M: GET /report
+  M-->>G: 402 {accepts: [{scheme: vexa, payTo: @shop, maxAmountRequired}]}
+  G->>A: trace: payment_required, quote
+  G->>A: POST /v1/transfers/prepare {to: @shop, agentId}
+  G->>A: GET /v1/agents/:id/state
+  Note over G: decrypt window amounts, build transfer +<br/>limit proofs (agent-proofs WASM), plan,<br/>sign the request with its authority key
+  G->>A: POST /v1/agents/:id/payments
+  A->>A: sponsorship policy
+  A->>S: create 4 contexts; verify equality+validity, range, limit
+  A->>N: request_signature(message, validity, limit, index, window)
+  N->>N: shape, recipient, domain, limit commitments, window
+  N->>P: sign(payload, path vexa-agent-{id})
+  P-->>N: Ed25519 signature
+  N-->>A: signature
+  A->>S: advance nonce, RequireContexts, Transfer, close contexts
+  A-->>G: 201 {txSig}
+  G->>M: GET /report, X-PAYMENT
+  M-->>G: 200
+  G->>A: trace: paid, retried, completed
+```
+
+The payment transaction uses the agent's durable nonce, because MPC signing can outlast a blockhash. If the contract refuses, the API closes the proof contexts so their rent comes back, and the payment never happens. A payment the contract approved but that never lands still counts against the window until it ages out, which errs on the safe side.
+
+## Stealth transfers
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant D as Sender device
+  participant A as Vexa API + stealth worker
+  participant S as Solana
+  participant I as NEAR Intents 1Click
+  participant Z as Zcash (shielded)
+
+  D->>A: POST /v1/transfers/prepare {to: @bob, mode: stealth}
+  A-->>D: stealth.depositAccount (entry, one-time)
+  D->>A: POST /v1/transfers/submit {withdraw plan, senderNote}
+  A->>S: withdraw to the entry address
+  A->>I: quote USDC → ZEC, recipient: route's shielded address
+  A->>S: entry → 1Click deposit address
+  I->>Z: ZEC to the shielded address
+  Note over A: random 2–20 min wait
+  A->>I: quote ZEC → USDC, recipient: exit (one-time)
+  A->>Z: shielded → 1Click deposit address
+  I->>S: USDC to the exit address
+  A->>S: exit: open account, deposit, confidential transfer to Bob, close accounts
+  A-->>D: transfer.settled
+```
+
+On-chain, the sender's withdrawal and the recipient's incoming transfer are joined only through the shielded pool. Route addresses derive from `STEALTH_ROUTE_SEED` and the route id, so nothing about them is stored; 1Click deposit addresses are stored before money moves; amounts are read from the chain or from 1Click at each step and held in memory only. A failed first leg is refunded to the entry address and paid back to the sender; a failed return leg is retried.
+
+The shielded wallet is zingolib's `zingo-cli`, a light wallet syncing from a public lightwalletd server over the Nym mixnet (`nym-proxy`), installed in the API's Docker image.
+
+## View keys
+
+A view key is an access secret and a decryption key derived from the owner's passkey and the key's id. The owner's device decrypts each transfer in scope and re-encrypts its amount and memo to the key (AES-256-GCM, bound to the transfer id); Vexa stores those records and a hash of the access secret, never the decryption key. `GET /v1/audit/export` returns them as a CSV signed with an Ed25519 key derived from `VIEW_KEY_ENCRYPTION_KEY`; the auditor's SDK checks the signature and decrypts. Revoking deletes the records.
+
+The mint's auditor key would give one key to every transfer on the platform, so it isn't how view keys work.
+
+## $VEXA
+
+An SPL token (1B supply, 6 decimals, mint and freeze authority revoked) created by `pnpm token:create`. Holders stake in the vault (`Stake`/`Unstake`, 7-day lock after each top-up); a holder's weight is staked + wallet ÷ 2. The vault reads the stake record and wallet account passed with a deposit or withdrawal and applies the tier discount itself; the API caps agents and their daily limits by the same tiers.

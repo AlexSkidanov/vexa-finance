@@ -390,12 +390,15 @@ The user's cUSDC balance **as ciphertexts**. Decrypt on the device: the AE key r
 **Idempotent.** Resolves the recipient and returns the keys the device encrypts to. **No amount is sent, now or later.**
 
 ```json
-{ "to": "@bob.vexa" }
+{ "to": "@bob.vexa", "mode": "standard" }
 ```
+
+`to` may also be `agent:<id>` to fund one of your agents. Set `agentId` when one of your agents is the payer (its payment is then submitted with [`POST /v1/agents/:id/payments`](#post-v1agentsidpayments)). `mode: "stealth"` starts a [stealth transfer](#stealth-transfers) and adds `stealth.depositAccount`, the one-time address to withdraw to.
 
 ```json
 {
   "transferId": "…",
+  "mode": "standard",
   "recipient": {
     "handle": "@bob.vexa",
     "solanaPubkey": "…",
@@ -420,6 +423,30 @@ The user's cUSDC balance **as ciphertexts**. Decrypt on the device: the AE key r
 ```
 
 Before sending, the API reads the grouped ciphertexts from the plan's validity proof and checks they're encrypted to the prepared sender, recipient and the mint's auditor. Those ciphertexts are all it stores. Emits `transfer.settled` to both parties. `409 transfer_already_submitted` if the transfer was already sent.
+
+For a stealth transfer, `plan` is a `withdraw` plan paying the prepared `stealth.depositAccount`, plus `senderNote`: the amount encrypted to the sender's own AE key, so their activity can show it. Returns `202`; the route continues in the background.
+
+### `GET /v1/transfers/:id`
+
+A transfer you sent. Stealth transfers add `stealth: { status, updatedAt }`.
+
+### Stealth transfers
+
+A stealth transfer leaves no on-chain link between sender and recipient. The sender withdraws to a one-time **entry** address; Vexa's stealth worker swaps it to ZEC through NEAR Intents 1Click into a shielded Zcash address it controls, waits a random 2 to 20 minutes, swaps back to USDC at a one-time **exit** address, deposits it into the vault and pays the recipient confidentially.
+
+| `stealth.status` | Meaning                                                                      |
+| ---------------- | ---------------------------------------------------------------------------- |
+| `awaiting_funds` | Prepared; the sender's withdrawal hasn't landed                              |
+| `routing`        | USDC → ZEC at 1Click                                                         |
+| `shielded`       | ZEC in the shielded pool, waiting out the delay                              |
+| `returning`      | ZEC → USDC at 1Click                                                         |
+| `settling`       | Paying the recipient                                                         |
+| `settled`        | Done: `transfer.settled` to both sides                                       |
+| `refunding`      | The first swap failed; paying the sender back                                |
+| `refunded`       | Back with the sender: `transfer.refunded`                                    |
+| `failed`         | Needs a person (for example 1Click held funds); Vexa's operators are alerted |
+
+Costs: the vault fee twice (withdraw and deposit), 1Click's fees (about 0.6 USDC in withdraw fees at today's prices, plus about 0.2% without a partner key), and ZEC network fees. The SDK refuses stealth transfers under 5 USDC. The recipient receives what's left; the sender's activity shows what they sent. Amounts are read from the chain and from 1Click while routing and held in memory only.
 
 ### `POST /v1/withdrawals`
 
@@ -452,6 +479,160 @@ Transfers sent and received, deposits and withdrawals, newest first. Transfer am
   ]
 }
 ```
+
+### `GET /v1/tier`
+
+Your $VEXA position and the tier it earns. Staked $VEXA counts in full, wallet $VEXA at half.
+
+```json
+{
+  "vexaMint": "…",
+  "staked": "10000000000",
+  "held": "10000000000",
+  "weight": "15000000000",
+  "unlockAt": "2026-10-07T12:00:00.000Z",
+  "tier": { "level": 2, "discountBps": 2500, "maxAgents": 10, "agentDailyLimit": "10000000000" }
+}
+```
+
+| Tier | Weight ($VEXA) | Fee discount | Agents | Agent limit per day |
+| ---- | -------------- | ------------ | ------ | ------------------- |
+| 0    | 0              | 0%           | 3      | $500                |
+| 1    | 1,000          | 10%          | 5      | $2,500              |
+| 2    | 10,000         | 25%          | 10     | $10,000             |
+| 3    | 100,000        | 50%          | 25     | $25,000             |
+| 4    | 1,000,000      | 75%          | 50     | $50,000             |
+
+### `POST /v1/stake` · `POST /v1/unstake`
+
+**Idempotent.** `{ "plan": { "kind": "stake" | "unstake", … } }`. Stakes lock for 7 days after each top-up. Vexa pays the stake record's rent the first time.
+
+---
+
+## Agents
+
+An agent is a sub-account for software (an AI agent paying for APIs, say) with limits the owner sets. Its Solana address is a NEAR MPC key derived for the policy contract and `vexa-agent-{id}`: nobody holds its private key. The policy contract asks the MPC network to sign an agent's transaction only when it's within the agent's policy.
+
+- **Owners** authorize changes with the Ed25519 key of their Solana wallet (`ownerSignature`), over the contract's authorization message (`authorizationMessage` in `@vexa/core/agent`).
+- **Agents** authorize payments with their own authority key, derived from their credential.
+- Amounts stay private: a payment carries a proof that it fits the per-payment limit and what's left of the rolling 24-hour limit, which the contract checks against the payment's hidden amount (see [ARCHITECTURE.md](ARCHITECTURE.md#agents)).
+
+All `/v1/agents` routes return `404` where the policy contract isn't configured. Refusals by the contract are `403 policy_refused`, with the contract's rule in `details.rule` (`LIMIT_PROOF_MISMATCH`, `RECIPIENT_NOT_ALLOWED`, `DOMAIN_NOT_ALLOWED`, `AGENT_PAUSED`, `AGENT_REVOKED`, `STALE_INDEX`, `BAD_SIGNATURE`, …). `403 agent_limit_reached` means your tier doesn't allow another agent or that daily limit.
+
+### `GET /v1/agents/config`
+
+`{ policyContract, mpcRootKey, feePayer }`: what a device needs to derive agent addresses and authorizations.
+
+### `POST /v1/agents`
+
+**Idempotent.**
+
+```json
+{
+  "id": "<uuid chosen by the device>",
+  "name": "research-bot",
+  "authority": "<base58 Ed25519 key>",
+  "elgamalPubkey": "<base64>",
+  "policy": {
+    "maxPerRequest": "10000000",
+    "dailyLimit": "25000000",
+    "allowedRecipients": [],
+    "allowedDomains": ["api.example.com"]
+  },
+  "ownerSignature": "<base58>"
+}
+```
+
+Creates the agent's durable nonce account (sponsored), registers the policy on NEAR and returns the agent. Policy limits are configuration, not balances, and are stored in plaintext. The SDK's `vexa.agents.create()` also opens the agent's confidential account and returns its **credential** (`vxagent_…`) for the agent software.
+
+### `GET /v1/agents` · `GET /v1/agents/:id`
+
+`GET /v1/agents/:id` adds the contract's `authNonce` and `nextPaymentIndex`.
+
+### `PATCH /v1/agents/:id/policy` · `POST /v1/agents/:id/pause` · `POST /v1/agents/:id/revoke`
+
+**Idempotent.** `{ policy | paused, nonce, ownerSignature }`. Revoking is final; the owner can still sweep the agent's funds back.
+
+### `POST /v1/agents/:id/configure` · `POST /v1/agents/:id/apply` · `POST /v1/agents/:id/sweep`
+
+**Idempotent.** `{ plan, signer: "agent" | "owner", nonce, signature }`: open the agent's confidential account, apply its pending balance, or send everything it holds back to the owner (allowed even when paused or revoked).
+
+### `GET /v1/agents/:id/state`
+
+What the agent's device needs for its next payment: balance ciphertexts, the durable nonce, `authNonce`, `nextIndex`, and the payments in its 24-hour window as ciphertexts (which it decrypts to prove the daily limit).
+
+### `POST /v1/agents/:id/payments`
+
+**Idempotent.** A payment prepared with `POST /v1/transfers/prepare { to, agentId }`:
+
+```json
+{
+  "transferId": "…",
+  "plan": { "kind": "agent-payment", "stages": [ … ] },
+  "signer": "agent",
+  "nonce": "7",
+  "signature": "<base58, by the agent's authority>",
+  "index": "3",
+  "windowStart": "1",
+  "domain": "api.example.com",
+  "validityContext": "<base64>",
+  "limitContext": "<base64>"
+}
+```
+
+The API checks the plan against the sponsorship policy, sends the proof stages, asks the policy contract for the agent's signature (which checks the limit proof against the transfer's hidden amount), then sends the transfer. Emits `transfer.settled`.
+
+### `GET /v1/agents/:id/activity` · `POST /v1/agents/:id/traces` · `GET /v1/agents/:id/traces?requestId=`
+
+Payments the agent made (as ciphertexts), and the steps it logged: `request`, `payment_required`, `quote`, `policy_check`, `paid`, `retried`, `completed`, `failed`. Trace details describe what happened (URL, recipient, outcome) and never include an amount.
+
+### x402
+
+`VexaAgent.fetch()` in `@vexa/sdk` pays [x402](https://x402.org) `402 Payment Required` responses. A server that accepts Vexa lists this in `accepts`:
+
+```json
+{
+  "x402Version": 1,
+  "accepts": [
+    {
+      "scheme": "vexa",
+      "network": "solana",
+      "maxAmountRequired": "5000000",
+      "resource": "https://api.example.com/report",
+      "payTo": "@shop.vexa",
+      "asset": "<cUSDC mint>"
+    }
+  ]
+}
+```
+
+The agent pays `payTo` confidentially within its policy (the request's hostname is the policy `domain`) and retries with `X-PAYMENT: base64({ x402Version, scheme, network, payload: { transferId, txSig } })`. `parseX402Payment()` reads that header; the seller sees the payment, amount decrypted, in its own activity.
+
+---
+
+## View keys
+
+A view key gives an auditor read access to your transfers in a date range, and is revocable. It's `vxview_<id>.<access secret>.<decryption key>`, derived from your passkey. Your device re-encrypts each transfer in scope (amount and memo) to the key and uploads only those records. Vexa stores a hash of the access secret and never the decryption key, so it can't read what it serves.
+
+### `POST /v1/view-keys`
+
+**Idempotent.** `{ id, label?, from, to, accessHash }`. `vexa.viewKeys.create()` does this and uploads the records; `vexa.viewKeys.sync()` adds transfers made since.
+
+### `GET /v1/view-keys` · `GET /v1/view-keys/:id` · `POST /v1/view-keys/:id/records` · `DELETE /v1/view-keys/:id`
+
+Records must be transfers you sent or received inside the key's scope. Deleting revokes the key and deletes its records.
+
+### `GET /v1/audit/export?viewKey=<id>.<access secret>`
+
+No other authentication. Returns a CSV of the transfers in scope, each record still encrypted, with an Ed25519 signature over the body in `X-Vexa-Signature`:
+
+```csv
+# vexa audit export; view key …; scope … to …
+transfer_id,created_at,direction,counterparty,tx_sig,record
+…,2026-09-30T10:00:00.000Z,sent,bob,5Kx…,<base64>
+```
+
+`exportAudit(viewKey)` in `@vexa/sdk` fetches it, checks the signature against `GET /v1/audit/signing-key`, and decrypts every row on the auditor's device.
 
 ---
 
@@ -489,11 +670,13 @@ Vexa-Event-Id: 0b7e…
 
 `v1` is the hex HMAC-SHA256 of `"<t>.<raw body>"` under the endpoint's secret. Reject timestamps more than five minutes old, and use `Vexa-Event-Id` to ignore duplicates: failed deliveries are retried with exponential backoff (30 s, doubling) for about four hours.
 
-| Event               | `data`                                                                                  |
-| ------------------- | --------------------------------------------------------------------------------------- |
-| `transfer.settled`  | `transferId`, `direction`, `txSig`, `ciphertext`                                        |
-| `deposit.confirmed` | `depositId`, `txSig`, and `source: "chain"` when the deposit was made directly on-chain |
-| `withdrawal.sent`   | `withdrawalId`, `destination`, `txSig`                                                  |
+| Event                      | `data`                                                                                  |
+| -------------------------- | --------------------------------------------------------------------------------------- |
+| `transfer.settled`         | `transferId`, `direction`, `txSig`, `ciphertext`                                        |
+| `deposit.confirmed`        | `depositId`, `txSig`, and `source: "chain"` when the deposit was made directly on-chain |
+| `withdrawal.sent`          | `withdrawalId`, `destination`, `txSig`                                                  |
+| `transfer.stealth_updated` | `transferId`, `status` (`routing`, `shielded`, `returning`)                             |
+| `transfer.refunded`        | `transferId`: a stealth transfer went back to the sender                                |
 
 No event ever contains a plaintext amount.
 
