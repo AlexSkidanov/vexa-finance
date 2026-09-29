@@ -131,9 +131,11 @@ Card issuing and KYC ship as interfaces with mock implementations first.
 | cUSDC mint (Token-2022, confidential transfers) | [`4STXpFN2mQSt12XG4os7ftLXHbBq5PVWYCAahToRt6QQ`](https://explorer.solana.com/address/4STXpFN2mQSt12XG4os7ftLXHbBq5PVWYCAahToRt6QQ) |
 | Vault config (mint authority, reserve owner)    | [`7Q3LNA4P3J7H4zNdHJEephe2XEvBPKPUJsqGifexRopw`](https://explorer.solana.com/address/7Q3LNA4P3J7H4zNdHJEephe2XEvBPKPUJsqGifexRopw) |
 | USDC reserve                                    | [`8eeishQYvtHwwM8QRN9629zzU9hBn18dGFW5T75ytqz6`](https://explorer.solana.com/address/8eeishQYvtHwwM8QRN9629zzU9hBn18dGFW5T75ytqz6) |
+| Fee schedule (0.10%, capped at 5 USDC)          | [`4PAtQdQRVfozc2F8x4eJF1oHhAQ6EMfX5EqBgPGnj29u`](https://explorer.solana.com/address/4PAtQdQRVfozc2F8x4eJF1oHhAQ6EMfX5EqBgPGnj29u) |
+| Treasury (USDC account receiving fees)          | [`713NQALYzFN2zVSJ1ERqhSFiQTMqVnFyCVybYdn3r9Gj`](https://explorer.solana.com/address/713NQALYzFN2zVSJ1ERqhSFiQTMqVnFyCVybYdn3r9Gj) |
 | USDC mint (Circle)                              | [`EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`](https://explorer.solana.com/address/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v) |
 
-The deployed bytecode is the `target/deploy/vault.so` built from this repository at the Phase 1 tag with `pnpm build:vault` (SHA-256 `f8d284af753f129c1799b8d1aea990026284cbe5ccf14ed3a5ac289dc3db8e46`). Compare it against `solana program dump 3g2JPX4roASUJVacf68sBSpARk5m9B3hu9xeaE6mTjPR vault.so -um`.
+The deployed bytecode is `target/deploy/vault.so` v0.3.0, built from this repository with `pnpm build:vault` (SHA-256 `71fa037dac978628aca3339a464f65f12dc863047b2d51e9c64eaf97cd729826`). To compare, dump it with `solana program dump 3g2JPX4roASUJVacf68sBSpARk5m9B3hu9xeaE6mTjPR vault.so -um` and hash the first 43,984 bytes; the rest of the account is zero padding.
 
 The reserve always holds at least as much USDC as the cUSDC supply; both are public and can be checked at any time.
 

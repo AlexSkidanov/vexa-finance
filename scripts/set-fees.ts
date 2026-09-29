@@ -59,7 +59,7 @@ async function main() {
     findAta(treasuryOwner, usdcMint, TOKEN_PROGRAM),
   ]);
   const account = async (a: Address) =>
-    (await rpc.getAccountInfo(a, { encoding: 'base64' }).send()).value;
+    (await rpc.getAccountInfo(a, { encoding: 'base64', commitment: 'confirmed' }).send()).value;
   const [feesInfo, treasuryInfo] = await Promise.all([account(fees), account(treasury)]);
   const current = feesInfo ? decodeFeeSchedule(Buffer.from(feesInfo.data[0], 'base64')) : null;
 
@@ -100,15 +100,16 @@ async function main() {
   ]);
   console.log(`Set: ${signature}`);
 
-  const written = await account(fees);
-  const decoded = written && decodeFeeSchedule(Buffer.from(written.data[0], 'base64'));
-  if (
-    !decoded ||
-    decoded.feeBps !== feeBps ||
-    decoded.feeCap !== feeCap ||
-    decoded.treasury !== treasury
-  )
-    throw new Error('the schedule on-chain does not match what was sent');
+  const matches = (d: FeeSchedule | null): d is FeeSchedule =>
+    !!d && d.feeBps === feeBps && d.feeCap === feeCap && d.treasury === treasury;
+  let decoded: FeeSchedule | null = null;
+  // The RPC can lag the confirmed write by a moment.
+  for (let attempt = 0; attempt < 10 && !matches(decoded); attempt++) {
+    if (attempt) await new Promise((r) => setTimeout(r, 2_000));
+    const written = await account(fees);
+    decoded = written && decodeFeeSchedule(Buffer.from(written.data[0], 'base64'));
+  }
+  if (!matches(decoded)) throw new Error('the schedule on-chain does not match what was sent');
   console.log(`On-chain: ${describe(decoded)}\n`);
 }
 

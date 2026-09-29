@@ -97,11 +97,15 @@ export async function sendTx(
   return getSignatureFromTransaction(signed);
 }
 
-/** Prints an error and the simulation logs Kit attaches, then exits. */
+/** Prints an error and any simulation logs Kit attached along its cause chain, then exits. */
 export function fail(e: unknown): never {
   console.error(e instanceof Error ? e.message : e);
-  type WithLogs = { context?: { logs?: string[] }; cause?: { context?: { logs?: string[] } } };
-  const logs = (e as WithLogs)?.context?.logs ?? (e as WithLogs)?.cause?.context?.logs;
-  if (logs) console.error(logs.join('\n'));
+  for (let err = e as { context?: { logs?: string[] }; cause?: unknown } | undefined; err;) {
+    if (err.context?.logs) {
+      console.error(err.context.logs.join('\n'));
+      break;
+    }
+    err = err.cause as typeof err;
+  }
   process.exit(1);
 }

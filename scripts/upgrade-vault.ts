@@ -28,6 +28,8 @@ const LOADER = address('BPFLoaderUpgradeab1e11111111111111111111111');
 const PROGRAM_DATA_HEADER = 45;
 /** Buffer header: tag u32 | Option<authority>. */
 const BUFFER_HEADER = 37;
+/** The loader refuses smaller extensions, short of reaching the maximum size. */
+const MIN_EXTENSION = 10_240;
 
 const expand = (p: string) => (p.startsWith('~/') ? join(homedir(), p.slice(2)) : p);
 const sha256 = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
@@ -60,7 +62,7 @@ async function main() {
     throw new Error(`${authority.address} is not the program's upgrade authority`);
 
   const capacity = data.length - PROGRAM_DATA_HEADER;
-  const growth = Math.max(0, binary.length - capacity);
+  const growth = binary.length > capacity ? Math.max(binary.length - capacity, MIN_EXTENSION) : 0;
   const rent = async (n: number) => rpc.getMinimumBalanceForRentExemption(BigInt(n)).send();
   const buffer = await rent(BUFFER_HEADER + binary.length);
   const extension = growth ? (await rent(data.length + growth)) - BigInt(info.lamports) : 0n;
@@ -91,32 +93,49 @@ async function main() {
   if (!execute) return console.log('Dry run. Re-run with --execute to upgrade.\n');
   if (balance < needed) throw new Error(`the payer needs ${sol(needed - balance)} more SOL`);
 
-  execFileSync(
-    'solana',
-    [
+  const cli = (args: string[]) =>
+    execFileSync('solana', [...args, '--url', rpcUrl, '--commitment', 'confirmed'], {
+      stdio: 'inherit',
+    });
+  // Extend explicitly: the CLI's automatic extension budgets more than it
+  // spends and refuses to start when the payer holds exactly what's needed.
+  if (growth) {
+    cli([
       'program',
-      'deploy',
-      SO_PATH,
-      '--program-id',
+      'extend',
       program,
-      '--upgrade-authority',
-      expand(authorityPath),
+      String(growth),
       '--keypair',
+      expand(authorityPath),
+      '--payer',
       expand(payerPath),
-      '--url',
-      rpcUrl,
-      '--use-rpc',
-    ],
-    { stdio: 'inherit' },
-  );
+    ]);
+  }
+  cli([
+    'program',
+    'deploy',
+    SO_PATH,
+    '--program-id',
+    program,
+    '--upgrade-authority',
+    expand(authorityPath),
+    '--keypair',
+    expand(payerPath),
+    '--no-auto-extend',
+    '--use-rpc',
+  ]);
 
-  const after = (
-    await rpc.getAccountInfo(programData, { encoding: 'base64', commitment: 'finalized' }).send()
-  ).value;
-  const code = Buffer.from(after!.data[0], 'base64').subarray(
-    PROGRAM_DATA_HEADER,
-    PROGRAM_DATA_HEADER + binary.length,
-  );
+  // The RPC can serve the old code for a few seconds after the upgrade lands.
+  let code = Buffer.alloc(0);
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if (attempt) await new Promise((r) => setTimeout(r, 3_000));
+    const after = (await rpc.getAccountInfo(programData, { encoding: 'base64' }).send()).value;
+    code = Buffer.from(after!.data[0], 'base64').subarray(
+      PROGRAM_DATA_HEADER,
+      PROGRAM_DATA_HEADER + binary.length,
+    );
+    if (sha256(code) === sha256(binary)) break;
+  }
   if (sha256(code) !== sha256(binary))
     throw new Error('on-chain bytecode does not match the binary');
   console.log(`\nUpgraded and verified: sha256 ${sha256(binary)}\n`);
