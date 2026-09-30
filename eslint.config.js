@@ -13,6 +13,8 @@ export default tseslint.config(
       'packages/core/wasm/**',
       'apps/web/.next/**',
       'apps/web/out/**',
+      'apps/app/.next/**',
+      'apps/app/out/**',
     ],
   },
   js.configs.recommended,
