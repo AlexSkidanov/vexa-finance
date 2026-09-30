@@ -44,6 +44,7 @@
 pub mod error;
 pub mod fees;
 pub mod instruction;
+pub mod stake;
 pub mod state;
 
 mod processor;
@@ -81,5 +82,8 @@ pub fn process_instruction(
         VaultInstruction::SetPaused => processor::admin::set_paused(accounts, args),
         VaultInstruction::SetAdmin => processor::admin::set_admin(accounts),
         VaultInstruction::SetFees => processor::admin::set_fees(accounts, args),
+        VaultInstruction::Stake => processor::stake::stake(accounts, args),
+        VaultInstruction::Unstake => processor::stake::unstake(accounts, args),
+        VaultInstruction::RequireContexts => processor::contexts::require(accounts, args),
     }
 }

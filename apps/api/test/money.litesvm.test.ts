@@ -17,6 +17,8 @@ import {
   configurePlan,
   findAta,
   TOKEN_PROGRAM,
+  findStakeRecord,
+  stakePlan,
   type RentTable,
 } from '@vexa/core/solana';
 import {
@@ -25,37 +27,10 @@ import {
   type Testbed,
   type Wallet,
 } from '../../../packages/core/test/support/testbed.js';
-import { ChainError, type Chain } from '../src/chain/chain.js';
+import { litesvmChain } from './support/litesvm.js';
 import { sessionToken, testApp } from './helpers.js';
 
 const USDC = 1_000_000n;
-
-function litesvmChain(bed: Testbed): Chain {
-  return {
-    feePayer: bed.feePayer.address,
-    async getAccountData(a) {
-      return bed.account(a);
-    },
-    async getRentTable() {
-      return bed.rent;
-    },
-    async getLatestBlockhash() {
-      bed.svm.expireBlockhash();
-      return bed.blockhash() as never;
-    },
-    async signAndSend(tx) {
-      try {
-        return await bed.sendAsFeePayer(tx);
-      } catch (e) {
-        throw new ChainError((e as Error).message, (e as { logs?: string[] }).logs ?? []);
-      }
-    },
-    async sendAsFeePayer(instructions) {
-      await bed.sendDirect(bed.feePayer, instructions);
-      return '';
-    },
-  };
-}
 
 // Proof generation is CPU-bound; shared CI runners need more than the 5 s default.
 describe.skipIf(!vaultBinaryExists())('money over HTTP, on LiteSVM', { timeout: 30_000 }, () => {
@@ -309,4 +284,66 @@ describe.skipIf(!vaultBinaryExists())('money over HTTP, on LiteSVM', { timeout: 
     });
     return compilePlan(plan, { feePayer: bed.feePayer.address, ...bed.blockhash() });
   }
+
+  it('stakes $VEXA for a user with no SOL and reports their tier', async () => {
+    const vexaMint = await bed.launchVexa();
+    const olivia = await person('olivia', 100n * USDC);
+    await bed.giveVexa(olivia.wallet, 2_000n * USDC);
+
+    await olivia.vexa.money.stake(1_000n * USDC, olivia.wallet.keys);
+    const info = await olivia.vexa.money.tier();
+    expect(info).toMatchObject({ vexaMint, staked: 1_000n * USDC, held: 1_000n * USDC });
+    // 1,000 staked + 1,000 held at half = 1,500: tier 1, 10% off.
+    expect(info.tier).toMatchObject({ level: 1, discountBps: 1_000, maxAgents: 5 });
+    expect(bed.svm.getBalance(olivia.wallet.signer.address) ?? 0n).toBe(0n);
+
+    // The SDK presents the stake to the vault: 10% off 0.10 USDC.
+    const deposit = await olivia.vexa.money.deposit(100n * USDC, olivia.wallet.keys);
+    expect(deposit).toMatchObject({ fee: 90_000n, discountBps: 1_000 });
+    expect((await olivia.vexa.money.balance(olivia.wallet.keys)).available).toBe(99_910_000n);
+
+    // Locked for a week.
+    await expect(olivia.vexa.money.unstake(USDC, olivia.wallet.keys)).rejects.toMatchObject({
+      status: 502,
+    });
+  });
+
+  it('refuses a stake plan aimed at someone else’s stake record', async () => {
+    const vexaMint = bed.feeSchedule.vexaMint ?? (await bed.launchVexa());
+    const peggy = await person('peggy', 0n, false);
+    const victim = await person('victor', 0n, false);
+    const plan = await stakePlan({
+      vault: bed.vault,
+      feePayer: bed.feePayer.address,
+      owner: peggy.wallet.signer,
+      vexaMint,
+      amount: USDC,
+    });
+    const ix = plan.stages[0]![0]!.instructions[0]! as unknown as {
+      accounts: { address: string }[];
+    };
+    ix.accounts[7]!.address = await findStakeRecord(victim.wallet.signer.address);
+    const compiled = await compilePlan(plan, {
+      feePayer: bed.feePayer.address,
+      ...bed.blockhash(),
+    });
+    const res = await api.request('POST', '/v1/stake', {
+      token: sessionToken(peggy.userId),
+      idempotencyKey: randomUUID(),
+      body: { plan: compiled },
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe('plan_refused');
+  });
+
+  it('publishes the reserve and the cUSDC supply, which match', async () => {
+    const { resetTransparencyCache } = await import('../src/routes/transparency.js');
+    resetTransparencyCache();
+    const res = await api.app.request('/v1/transparency');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { reserve: string; supply: string; match: boolean };
+    expect(BigInt(body.reserve)).toBeGreaterThan(0n);
+    expect(body.reserve).toBe(body.supply);
+    expect(body.match).toBe(true);
+  });
 });

@@ -43,6 +43,28 @@ const EnvSchema = z.object({
   ALCHEMY_WEBHOOK_SIGNING_KEY: z.string().optional(),
   ALCHEMY_WEBHOOK_ID: z.string().optional(),
   ALCHEMY_NOTIFY_AUTH_TOKEN: z.string().optional(),
+
+  // Agents. Without a policy contract the /v1/agents routes are disabled.
+  NEAR_RPC_URL: z.url().default('https://rpc.mainnet.near.org'),
+  NEAR_DEPLOYER_ACCOUNT_ID: z.string().optional(),
+  /** ed25519:<base58>: the relayer that pays for policy calls. */
+  NEAR_DEPLOYER_PRIVATE_KEY: z.string().optional(),
+  NEAR_POLICY_CONTRACT_ID: z.string().optional(),
+  NEAR_MPC_CONTRACT_ID: z.string().default('v1.signer'),
+
+  // Stealth transfers. Without the route seed and a Zcash wallet they're disabled.
+  INTENTS_1CLICK_BASE_URL: z.url().default('https://1click.chaindefuser.com'),
+  /** X-API-Key from partners.near-intents.org. Without it 1Click adds ~0.2% to quotes. */
+  INTENTS_1CLICK_API_KEY: z.string().optional(),
+  /** 32 bytes hex: every stealth route's one-time Solana addresses derive from it. */
+  STEALTH_ROUTE_SEED: hex32.optional(),
+  /** 24-word mnemonic of the shielded wallet routes pass through. */
+  ZCASH_SEED: z.string().optional(),
+  ZCASH_BIRTHDAY: z.coerce.number().int().positive().optional(),
+  ZCASH_DATA_DIR: z.string().default('/data/zcash'),
+  ZCASH_LIGHTWALLETD_URL: z.url().default('https://na.zec.rocks:443'),
+  ZINGO_CLI_PATH: z.string().default('zingo-cli'),
+  ZINGO_NYM_PROXY: z.string().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema> & {

@@ -146,7 +146,19 @@ export type CreatedApiKey = z.infer<typeof CreatedApiKey>;
 // ---------------------------------------------------------------------------
 
 export const CompiledPlanSchema = z.object({
-  kind: z.enum(['configure', 'deposit', 'apply-pending', 'transfer', 'withdraw']),
+  kind: z.enum([
+    'configure',
+    'deposit',
+    'apply-pending',
+    'transfer',
+    'withdraw',
+    'stake',
+    'unstake',
+    'agent-configure',
+    'agent-apply-pending',
+    'agent-payment',
+    'agent-sweep',
+  ]),
   stages: z
     .array(
       z
@@ -163,9 +175,11 @@ export const SubmitPlanRequest = z.object({ plan: CompiledPlanSchema });
 export type SubmitPlanRequest = z.infer<typeof SubmitPlanRequest>;
 
 export const PrepareTransferRequest = z.object({
-  /** `@alice.vexa`, `@alice` or `alice`. */
-  to: z.string().min(1).max(40),
+  /** `@alice.vexa`, `@alice` or `alice`; or `agent:<id>` to fund one of your agents. */
+  to: z.string().min(1).max(48),
   mode: z.enum(['standard', 'stealth']).default('standard'),
+  /** Set when one of your agents is the payer. */
+  agentId: z.uuid().optional(),
 });
 export type PrepareTransferRequest = z.input<typeof PrepareTransferRequest>;
 
@@ -173,6 +187,11 @@ const Base64 = z.string().regex(/^[A-Za-z0-9+/]*={0,2}$/, 'must be base64');
 
 export const SubmitTransferRequest = z.object({
   transferId: z.uuid(),
+  /**
+   * Stealth transfers only: the amount encrypted to the sender's own AE key,
+   * so their activity can show it. Nobody else can read it.
+   */
+  senderNote: Base64.max(64).optional(),
   plan: CompiledPlanSchema,
   /** Encrypted on the device to the recipient; the API stores it opaquely. */
   memoCiphertext: Base64.max(1400).optional(),
@@ -215,6 +234,8 @@ export const ChainContext = z.object({
     validityContext: z.string(),
     rangeU128Context: z.string(),
     rangeU64Context: z.string(),
+    stakeRecord: z.string(),
+    tokenAccount: z.string(),
   }),
   blockhash: z.string(),
   lastValidBlockHeight: z.string(),
@@ -246,3 +267,126 @@ export const VerifyWebhookRequest = z.object({
   signature: z.string().max(1024),
 });
 export type VerifyWebhookRequest = z.infer<typeof VerifyWebhookRequest>;
+
+// ---------------------------------------------------------------------------
+// Agents
+// ---------------------------------------------------------------------------
+
+const Base58Key = SolanaAddress;
+const Base58Signature = z
+  .string()
+  .regex(/^[1-9A-HJ-NP-Za-km-z]{64,90}$/, 'must be a base58 signature');
+const UsdcAmount = z.string().regex(/^\d{1,19}$/, 'USDC base units, as an integer string');
+const Domain = z
+  .string()
+  .max(253)
+  .regex(/^(?!-)[a-z0-9-]{1,63}(?:\.(?!-)[a-z0-9-]{1,63})+$/, 'must be a lowercase domain name');
+
+export const AgentPolicy = z
+  .object({
+    /** USDC base units. */
+    maxPerRequest: UsdcAmount,
+    /** USDC base units per rolling 24 hours. */
+    dailyLimit: UsdcAmount,
+    /** cUSDC accounts the agent may pay. Empty: any. */
+    allowedRecipients: z.array(Base58Key).max(32).default([]),
+    /** Domains the agent may pay for (x402). Empty: any. */
+    allowedDomains: z.array(Domain).max(32).default([]),
+  })
+  .refine((p) => BigInt(p.maxPerRequest) <= BigInt(p.dailyLimit), {
+    message: 'maxPerRequest can’t exceed dailyLimit',
+  });
+export type AgentPolicy = z.input<typeof AgentPolicy>;
+
+/** Owner-authorized: `ownerSignature` is by the owner's Solana key (see @vexa/core/agent). */
+export const CreateAgentRequest = z.object({
+  /** Chosen by the client: agent keys and the agent's address derive from it. */
+  id: z.uuid(),
+  name: z.string().trim().min(1).max(64).optional(),
+  authority: Base58Key,
+  elgamalPubkey: Base64,
+  policy: AgentPolicy,
+  ownerSignature: Base58Signature,
+});
+export type CreateAgentRequest = z.input<typeof CreateAgentRequest>;
+
+const OwnerAuthorization = z.object({
+  /** The agent's current `authNonce`. */
+  nonce: z.string().regex(/^\d+$/),
+  ownerSignature: Base58Signature,
+});
+
+export const UpdateAgentPolicyRequest = OwnerAuthorization.extend({ policy: AgentPolicy });
+export type UpdateAgentPolicyRequest = z.input<typeof UpdateAgentPolicyRequest>;
+
+export const SetAgentPausedRequest = OwnerAuthorization.extend({ paused: z.boolean() });
+export type SetAgentPausedRequest = z.input<typeof SetAgentPausedRequest>;
+
+export const RevokeAgentRequest = OwnerAuthorization;
+export type RevokeAgentRequest = z.input<typeof RevokeAgentRequest>;
+
+/** A plan with a transaction the agent signs through NEAR. */
+export const AgentPlanRequest = z.object({
+  plan: CompiledPlanSchema,
+  signer: z.enum(['agent', 'owner']),
+  nonce: z.string().regex(/^\d+$/),
+  /** Over the authorization message for `sign` (see @vexa/core/agent). */
+  signature: Base58Signature,
+});
+export type AgentPlanRequest = z.input<typeof AgentPlanRequest>;
+
+export const AgentPaymentRequest = AgentPlanRequest.extend({
+  transferId: z.uuid(),
+  index: z.string().regex(/^\d+$/),
+  windowStart: z.string().regex(/^\d+$/),
+  domain: Domain.optional(),
+  /** `proof_type ‖ context` of the validity and limit proofs. */
+  validityContext: Base64,
+  limitContext: Base64,
+  memoCiphertext: Base64.optional(),
+});
+export type AgentPaymentRequest = z.input<typeof AgentPaymentRequest>;
+
+export const AgentTraceRequest = z.object({
+  requestId: z.string().max(128).optional(),
+  step: z.enum([
+    'request',
+    'payment_required',
+    'quote',
+    'policy_check',
+    'paid',
+    'retried',
+    'completed',
+    'failed',
+  ]),
+  /** What happened: URL, recipient, outcome. Never an amount. */
+  detail: z
+    .record(z.string(), z.union([z.string().max(512), z.number(), z.boolean(), z.null()]))
+    .default({}),
+});
+export type AgentTraceRequest = z.input<typeof AgentTraceRequest>;
+
+// ---------------------------------------------------------------------------
+// View keys
+// ---------------------------------------------------------------------------
+
+export const CreateViewKeyRequest = z
+  .object({
+    /** Chosen by the client: the view key derives from it. */
+    id: z.uuid(),
+    label: z.string().trim().min(1).max(64).optional(),
+    from: z.iso.datetime(),
+    to: z.iso.datetime(),
+    /** Hex SHA-256 of the key's access secret (see @vexa/core/crypto). */
+    accessHash: z.string().regex(/^[0-9a-f]{64}$/),
+  })
+  .refine((v) => new Date(v.from) < new Date(v.to), { message: 'from must be before to' });
+export type CreateViewKeyRequest = z.input<typeof CreateViewKeyRequest>;
+
+export const AddViewRecordsRequest = z.object({
+  records: z
+    .array(z.object({ transferId: z.uuid(), record: Base64.max(5600) }))
+    .min(1)
+    .max(200),
+});
+export type AddViewRecordsRequest = z.input<typeof AddViewRecordsRequest>;

@@ -24,9 +24,11 @@ import {
   type Instruction,
   type KeyPairSigner,
   type Transaction,
+  type TransactionSigner,
 } from '@solana/kit';
 import {
   CONFIDENTIAL_ACCOUNT_SPACE,
+  STAKE_RECORD_LEN,
   contextStateSpace,
   ProofType,
   type RentTable,
@@ -41,6 +43,7 @@ export interface Chain {
   feePayer: Address;
   getAccountData(address: Address): Promise<Uint8Array | null>;
   getRentTable(): Promise<RentTable>;
+  getMinimumBalance(space: bigint): Promise<bigint>;
   getLatestBlockhash(): Promise<LatestBlockhash>;
   /**
    * Adds the fee payer's signature, simulates, sends and waits for
@@ -50,6 +53,8 @@ export interface Chain {
   signAndSend(transaction: Transaction): Promise<string>;
   /** Builds, signs (fee payer only) and sends a server-originated transaction. */
   sendAsFeePayer(instructions: Instruction[]): Promise<string>;
+  /** The fee payer as a signer, for server-built instructions it signs. */
+  feePayerSigner: TransactionSigner;
 }
 
 export class ChainError extends Error {
@@ -79,6 +84,8 @@ export function rentSpaces() {
     validityContext: contextStateSpace(ProofType.VerifyBatchedGroupedCiphertext3HandlesValidity),
     rangeU128Context: contextStateSpace(ProofType.VerifyBatchedRangeProofU128),
     rangeU64Context: contextStateSpace(ProofType.VerifyBatchedRangeProofU64),
+    stakeRecord: BigInt(STAKE_RECORD_LEN),
+    tokenAccount: 165n,
   } satisfies Record<keyof RentTable, bigint>;
 }
 
@@ -124,12 +131,17 @@ export async function createRpcChain(opts: {
 
   const chain: Chain = {
     feePayer: signer.address,
+    feePayerSigner: signer,
 
     async getAccountData(address) {
       const { value } = await rpc
         .getAccountInfo(address, { encoding: 'base64', commitment: 'confirmed' })
         .send();
       return value ? new Uint8Array(Buffer.from(value.data[0], 'base64')) : null;
+    },
+
+    async getMinimumBalance(space) {
+      return rpc.getMinimumBalanceForRentExemption(space).send();
     },
 
     async getRentTable() {

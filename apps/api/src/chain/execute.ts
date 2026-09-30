@@ -27,14 +27,27 @@ export class PlanFailed extends Error {
  * If any transaction fails, proof context accounts the plan created are
  * closed by the fee payer (it's their authority), so their rent is always
  * recovered, even when a client abandons a transfer halfway.
+ *
+ * `beforeStage` runs before each stage is sent. Agent plans use it to get the
+ * agent's signature from NEAR just before the transaction that needs it; if
+ * it throws, contexts are reclaimed the same way and the error is rethrown.
  */
 export async function executePlan(
   chain: Chain,
   stages: CheckedTransaction[][],
   logger: Logger,
+  opts: { beforeStage?: (index: number, stage: CheckedTransaction[]) => Promise<void> } = {},
 ): Promise<string[]> {
   const signatures: string[] = [];
-  for (const stage of stages) {
+  for (const [index, stage] of stages.entries()) {
+    if (opts.beforeStage) {
+      try {
+        await opts.beforeStage(index, stage);
+      } catch (err) {
+        await reclaimContexts(chain, stages, logger);
+        throw err;
+      }
+    }
     const results = await Promise.allSettled(stage.map((t) => chain.signAndSend(t.transaction)));
     for (const r of results) if (r.status === 'fulfilled') signatures.push(r.value);
     const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');

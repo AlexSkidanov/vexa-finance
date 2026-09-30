@@ -40,6 +40,7 @@ import {
   getMintToInstruction,
 } from '@solana-program/token-2022';
 import { deriveUserKeys, type UserKeys } from '../../src/crypto/index.js';
+import { feeScheduleTiers } from '../../src/tiers.js';
 import {
   ASSOCIATED_TOKEN_PROGRAM,
   CONFIDENTIAL_ACCOUNT_SPACE,
@@ -55,6 +56,7 @@ import {
   encodeFeeTerms,
   findFeeSchedule,
   setFeesInstruction,
+  STAKE_RECORD_LEN,
   type FeeSchedule,
   type VaultAccounts,
 } from '../../src/solana/index.js';
@@ -100,6 +102,10 @@ export interface Testbed {
   sendDirect(payer: KeyPairSigner, instructions: Instruction[]): Promise<void>;
   /** A wallet derived from a random passkey, holding `usdc` base units of USDC and no SOL. */
   newWallet(usdc: bigint): Promise<Wallet>;
+  /** Creates a $VEXA mint and adds the tier discounts to the fee schedule. */
+  launchVexa(): Promise<Address>;
+  /** Mints `amount` $VEXA to a wallet; returns its $VEXA account. */
+  giveVexa(wallet: Wallet, amount: bigint): Promise<Address>;
 }
 
 function failureOf(result: unknown): TransactionFailed | null {
@@ -261,6 +267,8 @@ export async function createTestbed(): Promise<Testbed> {
     rangeU64Context: svm.minimumBalanceForRentExemption(
       contextStateSpace(ProofType.VerifyBatchedRangeProofU64),
     ),
+    stakeRecord: svm.minimumBalanceForRentExemption(BigInt(STAKE_RECORD_LEN)),
+    tokenAccount: svm.minimumBalanceForRentExemption(165n),
   };
 
   const account = (addr: Address) => {
@@ -292,6 +300,46 @@ export async function createTestbed(): Promise<Testbed> {
       return getSignatureFromTransaction(signed);
     },
     sendDirect,
+    async launchVexa() {
+      const mint = await generateKeyPairSigner();
+      await sendDirect(admin, [
+        getCreateAccountInstruction({
+          payer: admin,
+          newAccount: mint,
+          lamports: rentFor(82),
+          space: 82,
+          programAddress: TOKEN_PROGRAM,
+        }),
+        getInitializeMint2Instruction(
+          { mint: mint.address, decimals: 6, mintAuthority: admin.address, freezeAuthority: null },
+          { programAddress: TOKEN_PROGRAM },
+        ),
+      ]);
+      feeSchedule.vexaMint = mint.address;
+      feeSchedule.tiers = feeScheduleTiers();
+      await sendDirect(admin, [
+        setFeesInstruction({ admin, config, fees, treasury, terms: encodeFeeTerms(feeSchedule) }),
+      ]);
+      return mint.address;
+    },
+    async giveVexa(wallet, amount) {
+      const mint = feeSchedule.vexaMint!;
+      const ata = await findAta(wallet.signer.address, mint, TOKEN_PROGRAM);
+      await sendDirect(admin, [
+        getCreateAssociatedTokenIdempotentInstruction({
+          payer: admin,
+          ata,
+          owner: wallet.signer.address,
+          mint,
+          tokenProgram: TOKEN_PROGRAM,
+        }),
+        getMintToInstruction(
+          { mint, token: ata, mintAuthority: admin, amount },
+          { programAddress: TOKEN_PROGRAM },
+        ),
+      ]);
+      return ata;
+    },
     async newWallet(usdc) {
       const keys = deriveUserKeys(crypto.getRandomValues(new Uint8Array(32)));
       const signer = await createKeyPairSignerFromPrivateKeyBytes(keys.solanaSeed);

@@ -8,3 +8,10 @@ CODE_OF_CONDUCT.md
 LICENSE-*
 programs/vault/target
 programs/vault/idl
+packages/core/wasm
+apps/web/.next
+apps/web/out
+apps/web/next-env.d.ts
+apps/app/.next
+apps/app/out
+apps/app/next-env.d.ts

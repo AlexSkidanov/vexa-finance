@@ -83,18 +83,27 @@ passkey PRF output ─┬─ ConfidentialKeys.fromPrf ─┬─ ElGamal keypair 
 
 Passkeys sync through iCloud Keychain and Google Password Manager, so the same keys are available on every device the user owns.
 
-### Agents, stealth transfers and view keys
+### Agents
 
-These land in upcoming releases; see [Status](#status). The designs are summarized in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+An agent is a sub-account for software, such as an AI agent paying for APIs. Its Solana key is an MPC key held by NEAR, and the [policy contract](contracts/near-policy) only has it sign payments within the owner's limits: a maximum per payment, a rolling 24-hour limit, allowed recipients and domains. The limits are checked on the payment's **hidden** amount: each payment carries a zero-knowledge proof that it fits, which the contract checks against the transfer's commitments. Agents pay [x402](https://x402.org) `402 Payment Required` responses on their own, and every step is logged for the owner.
+
+### Stealth transfers
+
+A stealth transfer leaves no on-chain link between sender and recipient: it goes out through a one-time address, across the Zcash shielded pool via NEAR Intents, and back in at another one-time address that pays the recipient confidentially.
+
+### View keys and $VEXA
+
+View keys give an auditor scoped, revocable read access, decrypted on the auditor's device from a signed export. $VEXA holders get fee discounts and higher agent limits by stake (details in [docs/API.md](docs/API.md#get-v1tier)).
 
 ## Repository layout
 
 ### ⛓️ On-chain
 
-| Name        | Description                                                              | Path                                |
-| ----------- | ------------------------------------------------------------------------ | ----------------------------------- |
-| vault       | Pinocchio program wrapping USDC 1:1 into confidential cUSDC              | [`programs/vault`](programs/vault)  |
-| near-policy | NEAR contract enforcing agent spend policies and gating chain signatures | `contracts/near-policy` _(planned)_ |
+| Name         | Description                                                                     | Path                                             |
+| ------------ | ------------------------------------------------------------------------------- | ------------------------------------------------ |
+| vault        | Pinocchio program wrapping USDC 1:1 into confidential cUSDC                     | [`programs/vault`](programs/vault)               |
+| near-policy  | NEAR contract enforcing agent spend policies and gating chain signatures        | [`contracts/near-policy`](contracts/near-policy) |
+| agent-proofs | Agent payment and spend-limit proofs (solana-zk-sdk 7, compiled to WebAssembly) | [`crates/agent-proofs`](crates/agent-proofs)     |
 
 ### 🧩 Packages
 
@@ -116,10 +125,10 @@ These land in upcoming releases; see [Status](#status). The designs are summariz
 | ----- | ---------------------------------------------------------------------------------------- | ----------------------------------- |
 | 0     | Environment and secrets audit                                                            | ✅ Done                             |
 | 1     | Monorepo, API, Supabase schema and RLS, email + passkey auth, handles, vault program, CI | ✅ Vault live on mainnet, in review |
-| 2     | Deposits, confidential transfers, withdrawals, fees, webhooks                            | 🚧 In progress                      |
-| 3     | Agent accounts and policies, x402 payments, stealth mode, view keys, $VEXA               | Planned                             |
+| 2     | Deposits, confidential transfers, withdrawals, fees, webhooks                            | ✅ Fee live on mainnet, in review   |
+| 3     | Agent accounts and policies, x402 payments, stealth mode, view keys, $VEXA               | ✅ Built and tested, in review      |
 
-Card issuing and KYC ship as interfaces with mock implementations first.
+Card issuing and KYC ship as interfaces with mock implementations (`@vexa/core`) for now.
 
 ## Deployments
 
@@ -135,16 +144,16 @@ Card issuing and KYC ship as interfaces with mock implementations first.
 | Treasury (USDC account receiving fees)          | [`713NQALYzFN2zVSJ1ERqhSFiQTMqVnFyCVybYdn3r9Gj`](https://explorer.solana.com/address/713NQALYzFN2zVSJ1ERqhSFiQTMqVnFyCVybYdn3r9Gj) |
 | USDC mint (Circle)                              | [`EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`](https://explorer.solana.com/address/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v) |
 
-The deployed bytecode is `target/deploy/vault.so` v0.3.0, built from this repository with `pnpm build:vault` (SHA-256 `71fa037dac978628aca3339a464f65f12dc863047b2d51e9c64eaf97cd729826`). To compare, dump it with `solana program dump 3g2JPX4roASUJVacf68sBSpARk5m9B3hu9xeaE6mTjPR vault.so -um` and hash the first 43,984 bytes; the rest of the account is zero padding.
+The deployed bytecode is `target/deploy/vault.so` v0.5.0, built from this repository with `pnpm build:vault` (SHA-256 `e10142a4a5790485c036aa84ed510112537be4a24828c2c439bb1d59a88420b3`). To compare, dump it with `solana program dump 3g2JPX4roASUJVacf68sBSpARk5m9B3hu9xeaE6mTjPR vault.so -um` and hash the first 52,272 bytes; the rest of the account is zero padding.
 
 The reserve always holds at least as much USDC as the cUSDC supply; both are public and can be checked at any time.
 
 ### 🔗 NEAR mainnet
 
-| Component                     | Address                                                |
-| ----------------------------- | ------------------------------------------------------ |
-| MPC signer (chain signatures) | [`v1.signer`](https://nearblocks.io/address/v1.signer) |
-| Policy contract               | _Phase 3_                                              |
+| Component                     | Address                                                              |
+| ----------------------------- | -------------------------------------------------------------------- |
+| MPC signer (chain signatures) | [`v1.signer`](https://nearblocks.io/address/v1.signer)               |
+| Policy contract               | [`vexa-policy.near`](https://nearblocks.io/address/vexa-policy.near) |
 
 ## Pre-requisites
 
@@ -185,6 +194,41 @@ Server-side code authenticates with an API key instead. The environment is read 
 
 ```ts
 const vexa = new Vexa({ apiKey: process.env.VEXA_API_KEY }); // vx_live_…
+```
+
+Money: amounts are in USDC base units (6 decimals), encrypted and proven on the device.
+
+```ts
+await vexa.money.openAccount(keys);
+await vexa.money.deposit(50_000_000n, keys); // 50 USDC in, less 0.10%
+await vexa.money.transfer({ to: '@bob', amount: 12_500_000n, memo: 'dinner' }, keys);
+await vexa.money.transfer({ to: '@bob', amount: 20_000_000n, mode: 'stealth' }, keys);
+const activity = await vexa.money.activity(keys); // amounts and memos decrypted here
+```
+
+Agents: the owner creates one and hands its credential to the agent software.
+
+```ts
+const { agent, credential } = await vexa.agents.create(
+  { name: 'research-bot', policy: { maxPerRequest: 10_000_000n, dailyLimit: 25_000_000n } },
+  keys,
+);
+await vexa.money.transfer({ to: `agent:${agent.id}`, amount: 30_000_000n }, keys);
+
+// In the agent:
+import { VexaAgent } from '@vexa/sdk';
+const bot = new VexaAgent({ apiKey: process.env.VEXA_API_KEY, credential: process.env.VEXA_AGENT });
+await bot.pay({ to: '@shop', amount: 2_500_000n });
+const report = await bot.fetch('https://api.example.com/report'); // pays x402 402s within its policy
+```
+
+View keys, for an auditor:
+
+```ts
+const { viewKey } = await vexa.viewKeys.create({ from, to, label: 'FY2026' }, keys);
+// The auditor, without a Vexa account:
+import { exportAudit } from '@vexa/sdk';
+const { rows, csv, signatureValid } = await exportAudit(viewKey);
 ```
 
 ### Running the backend

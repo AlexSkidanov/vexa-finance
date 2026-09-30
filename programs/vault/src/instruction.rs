@@ -10,6 +10,9 @@
 //! | 4   | `SetPaused`                    | `paused: u8` (0 or 1)                                  |
 //! | 5   | `SetAdmin`                     | none                                                   |
 //! | 6   | `SetFees`                      | `fee_bps: u16`, `fee_cap: u64`, `vexa_mint: [u8; 32]`, `tier_count: u8`, tiers |
+//! | 7   | `Stake`                        | `amount: u64`                                          |
+//! | 8   | `Unstake`                      | `amount: u64`                                          |
+//! | 9   | `RequireContexts`              | `sha256: [u8; 32]` per context account                 |
 //!
 //! Account lists are documented on each processor and mirrored by the
 //! builders in `@vexa/core` and the test harness.
@@ -26,6 +29,9 @@ pub enum VaultInstruction {
     SetPaused = 4,
     SetAdmin = 5,
     SetFees = 6,
+    Stake = 7,
+    Unstake = 8,
+    RequireContexts = 9,
 }
 
 impl TryFrom<u8> for VaultInstruction {
@@ -40,6 +46,9 @@ impl TryFrom<u8> for VaultInstruction {
             4 => Self::SetPaused,
             5 => Self::SetAdmin,
             6 => Self::SetFees,
+            7 => Self::Stake,
+            8 => Self::Unstake,
+            9 => Self::RequireContexts,
             _ => return Err(ProgramError::InvalidInstructionData),
         })
     }

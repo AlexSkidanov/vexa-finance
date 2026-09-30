@@ -22,6 +22,10 @@ export const WEBHOOK_EVENT_TYPES = [
   'transfer.settled',
   'deposit.confirmed',
   'withdrawal.sent',
+  /** A stealth transfer moved on: routing, shielded, returning. */
+  'transfer.stealth_updated',
+  /** A stealth transfer couldn't complete and went back to the sender. */
+  'transfer.refunded',
 ] as const;
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];
 

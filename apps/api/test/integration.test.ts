@@ -263,6 +263,8 @@ describe.skipIf(!enabled)('integration: Supabase + Postgres', () => {
       tokens: createSupabaseTokenVerifier({ supabaseUrl: env.SUPABASE_URL }),
       chain: offlineChain,
       vault: TEST_VAULT,
+      policy: null,
+      stealth: null,
       version: 'it',
     });
     const session = await auth.sessionForUser(id);

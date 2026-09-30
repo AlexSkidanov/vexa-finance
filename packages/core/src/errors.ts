@@ -19,6 +19,10 @@ export const ErrorCode = {
   InvalidApiKey: 'invalid_api_key',
   WrongEnvironment: 'wrong_environment',
   Forbidden: 'forbidden',
+  /** The NEAR policy contract refused an agent's request (the message says which rule). */
+  PolicyRefused: 'policy_refused',
+  /** The owner's $VEXA tier doesn't allow another agent, or a limit this high. */
+  AgentLimitReached: 'agent_limit_reached',
   // 404
   NotFound: 'not_found',
   // 409

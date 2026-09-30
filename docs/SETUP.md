@@ -184,15 +184,24 @@ Minimum balance now: **0.1 NEAR**. Later: Phase 3 locks **~1 NEAR per 100 KB** o
 ## 6. NEAR Intents 1Click
 
 - **`INTENTS_1CLICK_BASE_URL`**: keep `https://1click.chaindefuser.com`.
-- **`INTENTS_1CLICK_JWT`**: optional. Without it, quotes work but include an extra fee. To get one, follow **docs.near-intents.org** → 1Click API → Authentication (partner JWT request form).
+- **`INTENTS_1CLICK_API_KEY`**: optional. Without it, quotes work but 1Click adds about 0.2%. Request a key at **partners.near-intents.org**; it's sent as `X-API-Key`.
 
-1Click enforces per-route minimum swap sizes. We'll quote the real minimum for the USDC → ZEC → USDC round trip at the start of Phase 3, before you fund anything for stealth tests.
+1Click's minimums today are about 1.84 USDC in and 0.00132 ZEC in, with withdraw fees of about 0.31 USDC and 32,000 zatoshis per leg. The SDK won't start a stealth transfer under 5 USDC.
 
 ---
 
-## 7. Zcash (Phase 3, leave blank now)
+## 7. Stealth routing (Zcash)
 
-The stealth route needs a shielded wallet we control, one z-address per route: a synced `zallet` (or `zcashd`) with its JSON-RPC exposed privately to the API. Values: `ZCASH_WALLET_RPC_URL`, `ZCASH_WALLET_RPC_USER`, `ZCASH_WALLET_RPC_PASSWORD`. We'll set this up at the start of Phase 3.
+Stealth transfers pass through a shielded wallet Vexa controls, a zingolib light wallet (no full node) the API drives with `zingo-cli`. The Docker image builds `zingo-cli` and `nym-proxy` from a pinned zingolib release; the wallet goes online through the Nym mixnet.
+
+1. **`STEALTH_ROUTE_SEED`**: `openssl rand -hex 32`. Every route's one-time Solana addresses derive from it. **Back it up**: routes in flight need it to finish.
+2. **`ZCASH_SEED`** and **`ZCASH_BIRTHDAY`**: the wallet's 24-word mnemonic and the block height it was created at. Use a wallet that holds nothing else.
+3. **`ZCASH_DATA_DIR`**: `/data/zcash` in the image. On Railway, add a **volume** mounted at `/data` so the wallet doesn't resync from its birthday on every deploy.
+4. `ZCASH_LIGHTWALLETD_URL` defaults to `https://na.zec.rocks:443`.
+
+The wallet needs no ZEC of its own: each route keeps back enough of what it swapped in for the Zcash fee of the swap out.
+
+To run it locally, build from https://github.com/zingolabs/zingolib at the tag in the Dockerfile: `cargo build --release -p zingo-cli` and `cargo build --release --manifest-path zingo-netutils/Cargo.toml --features nym --bin nym-proxy`, then set `ZINGO_CLI_PATH` and `ZINGO_NYM_PROXY`.
 
 ---
 
@@ -211,13 +220,16 @@ The code lives at **github.com/AlexSkidanov/vexa-finance**. Pushing from your ma
 
 1. **railway.com** → **New Project** → **Empty project**. Name it `vexa`.
 2. **`RAILWAY_TOKEN`**: project → **Settings** → **Tokens** → **Create token**, environment **production** (or a `staging` environment for devnet). Copy it.
-3. Later the API service gets every non-CI variable from this file via **Service → Variables → Raw Editor**.
+3. Connect the repo: the service builds from the root `Dockerfile` (`railway.json` says so).
+4. Add a **volume** mounted at `/data` (the Zcash wallet's state).
+5. The service gets every non-CI variable from this file via **Service → Variables → Raw Editor**, except `ZCASH_DATA_DIR`, `ZINGO_CLI_PATH` and `ZINGO_NYM_PROXY`, which the image sets.
+6. After the first deploy, point the Alchemy webhook at `https://<service>/v1/hooks/alchemy`.
 
 ---
 
 ## 10. Stubs
 
-`CARD_ISSUER_API_KEY` and `KYC_PROVIDER_API_KEY` stay empty. Cards (Lithic/Rain) and KYC (Persona/Sumsub) are interface-only with mock implementations.
+`CARD_ISSUER_API_KEY` and `KYC_PROVIDER_API_KEY` stay empty. Cards (Lithic/Rain) and KYC (Persona/Sumsub) are interfaces in `@vexa/core` (`CardIssuer`, `KycProvider`) with mock implementations.
 
 ---
 
@@ -262,6 +274,31 @@ The program keypair lives at `target/deploy/vault-keypair.json` (gitignored). Ke
 
 ---
 
+## 12. Agents: the NEAR policy contract
+
+```bash
+cd contracts/near-policy && cargo near build non-reproducible-wasm && cd -
+pnpm deploy:policy              # dry run: account, storage deposit, balances
+pnpm deploy:policy --execute
+```
+
+This creates `vexa-policy.near` through the `near` registrar, funded by the deployer with the contract's storage deposit (about 2.4 NEAR for 228 KB), with a fresh key saved to `~/.near-credentials/mainnet/vexa-policy.near.json`. That key can redeploy the contract: keep it offline. The contract is initialized with the deployer as its relayer (the account the API calls through) and `v1.signer`'s Ed25519 root key. Agents' Solana addresses derive from the contract account, so don't move it once agents exist.
+
+The deployer pays for relaying: about 0.02 NEAR of storage per agent and 0.001 NEAR plus gas per agent payment. Keep a few tenths of a NEAR on it.
+
+## 13. $VEXA
+
+```bash
+pnpm token:create --uri <metadata JSON on IPFS or Arweave>              # dry run
+pnpm token:create --uri <…> --execute
+pnpm vault:set-fees --vexa-mint <printed mint> --execute                # turns on discounts and staking
+pnpm upgrade:vault --authority ~/.config/vexa/upgrade-authority.json --execute   # if the vault predates staking
+```
+
+`token:create` makes the mint, mints 1,000,000,000 VEXA to the treasury's $VEXA account, writes immutable Metaplex metadata and revokes the mint authority, in one transaction. The metadata JSON (`name`, `symbol`, `description`, `image`) must be permanent: it can't be changed afterwards.
+
+---
+
 ## Checklist
 
 ```
@@ -277,4 +314,7 @@ The program keypair lives at `target/deploy/vault-keypair.json` (gitignored). Ke
 [ ] pnpm db:migrate
 [ ] pnpm build:vault && pnpm deploy:vault --execute
 [ ] pnpm vault:set-fees --execute
+[ ] pnpm deploy:policy --execute                  (agents)
+[ ] STEALTH_ROUTE_SEED, ZCASH_SEED, ZCASH_BIRTHDAY (stealth), Railway volume at /data
+[ ] pnpm token:create --execute; vault:set-fees --vexa-mint ($VEXA)
 ```
