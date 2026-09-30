@@ -11,6 +11,8 @@ export default tseslint.config(
       '**/.anchor/**',
       '**/*.d.ts',
       'packages/core/wasm/**',
+      'apps/web/.next/**',
+      'apps/web/out/**',
     ],
   },
   js.configs.recommended,

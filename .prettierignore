@@ -9,3 +9,6 @@ LICENSE-*
 programs/vault/target
 programs/vault/idl
 packages/core/wasm
+apps/web/.next
+apps/web/out
+apps/web/next-env.d.ts
