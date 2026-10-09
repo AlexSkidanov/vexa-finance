@@ -1,0 +1,10 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "env": ["NEXT_PUBLIC_VEXA_API_URL", "NEXT_PUBLIC_VEXA_DEMO", "NEXT_PUBLIC_SOLANA_RPC_URL"],
+      "outputs": [".next/**", "!.next/cache/**", "out/**"]
+    }
+  }
+}

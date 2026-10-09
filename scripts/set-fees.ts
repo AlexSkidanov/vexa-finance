@@ -1,5 +1,5 @@
 /**
- * pnpm vault:set-fees [--bps 10] [--cap 5] [--execute] [--env path/to/.env]
+ * pnpm vault:set-fees [--bps 10] [--cap 5] [--vexa-mint <mint>] [--execute] [--env path/to/.env]
  *
  * Sets the vault's fee schedule, signed by the vault admin:
  *
@@ -7,7 +7,9 @@
  *      TREASURY_OWNER_PUBKEY) if it doesn't exist yet. Fees land there.
  *   2. Calls vault SetFees with the rate in basis points and the cap in whole
  *      USDC. The first call creates the schedule account; later calls replace
- *      it. $VEXA discount tiers are set here too once $VEXA exists (Phase 3).
+ *      it. With a $VEXA mint (`--vexa-mint`, or the one already set), the
+ *      discount tiers from @vexa/core's tier table are set too, which also
+ *      opens staking.
  *
  * The program refuses a rate above 1%. Until a schedule exists, the vault
  * refuses deposits and withdrawals. Without --execute it prints the plan, the
@@ -26,6 +28,7 @@ import {
   TOKEN_PROGRAM,
   type FeeSchedule,
 } from '@vexa/core/solana';
+import { feeScheduleTiers } from '@vexa/core';
 import { arg, connect, execute, fail, keypairBytes, loadEnv, sendTx, sol } from './lib/solana.js';
 
 const USDC = 1_000_000n;
@@ -34,7 +37,9 @@ function describe(s: Omit<FeeSchedule, 'treasury'> & { treasury?: Address }) {
   const pct = (s.feeBps / 100).toFixed(2);
   const cap = (Number(s.feeCap) / Number(USDC)).toFixed(2);
   const tiers = s.tiers.length
-    ? s.tiers.map((t) => `${t.discountBps / 100}% off from ${t.minBalance}`).join(', ')
+    ? s.tiers
+        .map((t) => `${t.discountBps / 100}% off from ${Number(t.minBalance) / 1e6}`)
+        .join(', ')
     : 'none';
   return `${pct}% capped at ${cap} USDC; $VEXA tiers: ${tiers}`;
 }
@@ -71,7 +76,10 @@ async function main() {
   };
   const total = Object.values(costs).reduce((a, b) => a + b, 0n);
   const balance = (await rpc.getBalance(admin.address).send()).value;
-  const next = { feeBps, feeCap, vexaMint: null, tiers: [] };
+  // $VEXA discounts: from --vexa-mint, else whatever the schedule already has.
+  const vexaArg = arg('vexa-mint');
+  const vexaMint = vexaArg ? address(vexaArg) : (current?.vexaMint ?? null);
+  const next = { feeBps, feeCap, vexaMint, tiers: vexaMint ? feeScheduleTiers() : [] };
 
   console.log(`\nVault fee schedule (${execute ? 'EXECUTE' : 'dry run'})\n`);
   console.log(`  program         ${program}`);

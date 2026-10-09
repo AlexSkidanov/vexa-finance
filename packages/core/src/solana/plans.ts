@@ -28,6 +28,8 @@ import {
   pipe,
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
+  setTransactionMessageLifetimeUsingDurableNonce,
+  type Nonce,
   type Address,
   type Blockhash,
   type Instruction,
@@ -45,15 +47,35 @@ import {
   ProofType,
   verifyProofInstruction,
 } from './proof-program.js';
-import { TOKEN_2022_PROGRAM, ZK_ELGAMAL_PROOF_PROGRAM } from './programs.js';
+import {
+  findAta,
+  TOKEN_2022_PROGRAM,
+  TOKEN_PROGRAM,
+  VAULT_PROGRAM,
+  ZK_ELGAMAL_PROOF_PROGRAM,
+} from './programs.js';
 import {
   configureConfidentialAccountInstruction,
   depositInstruction,
+  findStakeRecord,
+  stakeInstruction,
+  unstakeInstruction,
   withdrawInstruction,
   type VaultAccounts,
 } from './vault.js';
 
-export type PlanKind = 'configure' | 'deposit' | 'apply-pending' | 'transfer' | 'withdraw';
+export type PlanKind =
+  | 'configure'
+  | 'deposit'
+  | 'apply-pending'
+  | 'transfer'
+  | 'withdraw'
+  | 'stake'
+  | 'unstake'
+  | 'agent-configure'
+  | 'agent-apply-pending'
+  | 'agent-payment'
+  | 'agent-sweep';
 
 export type StepLabel =
   | 'fund-and-configure'
@@ -64,10 +86,19 @@ export type StepLabel =
   | 'verify-range'
   | 'verify-equality'
   | 'transfer'
-  | 'withdraw';
+  | 'withdraw'
+  | 'stake'
+  | 'unstake'
+  | 'verify-limit'
+  | 'agent-transfer';
 
 export interface PlannedTransaction {
   label: StepLabel;
+  /**
+   * Use a durable nonce instead of the recent blockhash. The nonce advance is
+   * prepended to the instructions. Agent payments use this.
+   */
+  durableNonce?: { nonceAccount: Address; authority: Address; nonce: string };
   instructions: Instruction[];
 }
 
@@ -84,6 +115,10 @@ export interface RentTable {
   validityContext: bigint;
   rangeU128Context: bigint;
   rangeU64Context: bigint;
+  /** A vault stake record (82 bytes). */
+  stakeRecord: bigint;
+  /** A plain SPL token account (165 bytes): the stake vault. */
+  tokenAccount: bigint;
 }
 
 /** Bytes of a Token-2022 ATA (with ImmutableOwner) plus the confidential extension. */
@@ -141,7 +176,7 @@ export function depositPlan(input: {
   ownerCusdc: Address;
   /** USDC taken from the wallet, fee included. */
   amount: bigint;
-  vexaAccount?: Address;
+  discountAccounts?: Address[];
   /** The account's credit counter after this deposit lands (current + 1). */
   expectedPendingBalanceCreditCounter: bigint;
   /** AE encryption of (available + everything pending + amount − fee). */
@@ -160,7 +195,7 @@ export function depositPlan(input: {
               ownerUsdc: input.ownerUsdc,
               ownerCusdc: input.ownerCusdc,
               amount: input.amount,
-              vexaAccount: input.vexaAccount,
+              discountAccounts: input.discountAccounts,
             }),
             getApplyConfidentialPendingBalanceInstruction({
               token: input.ownerCusdc,
@@ -332,6 +367,81 @@ export async function transferPlan(input: TransferPlanInput): Promise<Plan> {
 }
 
 // ---------------------------------------------------------------------------
+// Stake / unstake: lock $VEXA in the vault for discounts and agent limits
+// ---------------------------------------------------------------------------
+
+async function stakeAccounts(vault: VaultAccounts, owner: Address, vexaMint: Address) {
+  const [ownerVexa, stakeVault, stakeRecord] = await Promise.all([
+    findAta(owner, vexaMint, TOKEN_PROGRAM),
+    findAta(vault.config, vexaMint, TOKEN_PROGRAM),
+    findStakeRecord(owner, vault.program ?? VAULT_PROGRAM),
+  ]);
+  return { ownerVexa, stakeVault, stakeRecord };
+}
+
+/**
+ * Stakes `amount` $VEXA. The fee payer funds the stake record (and the stake
+ * vault, once) the first time; after that it only pays the fee.
+ */
+export async function stakePlan(input: {
+  vault: VaultAccounts;
+  feePayer: Address;
+  owner: TransactionSigner;
+  vexaMint: Address;
+  amount: bigint;
+}): Promise<Plan> {
+  const accounts = await stakeAccounts(input.vault, input.owner.address, input.vexaMint);
+  return {
+    kind: 'stake',
+    stages: [
+      [
+        {
+          label: 'stake',
+          instructions: [
+            stakeInstruction({
+              vault: input.vault,
+              owner: input.owner,
+              payer: createNoopSigner(input.feePayer),
+              vexaMint: input.vexaMint,
+              amount: input.amount,
+              ...accounts,
+            }),
+          ],
+        },
+      ],
+    ],
+  };
+}
+
+export async function unstakePlan(input: {
+  vault: VaultAccounts;
+  owner: TransactionSigner;
+  vexaMint: Address;
+  amount: bigint;
+}): Promise<Plan> {
+  const accounts = await stakeAccounts(input.vault, input.owner.address, input.vexaMint);
+  return {
+    kind: 'unstake',
+    stages: [
+      [
+        {
+          label: 'unstake',
+          instructions: [
+            unstakeInstruction({
+              vault: input.vault,
+              owner: input.owner,
+              vexaMint: input.vexaMint,
+              amount: input.amount,
+              ...accounts,
+            }),
+          ],
+        },
+      ],
+    ],
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Withdraw: confidential → public → burn, USDC out
 // ---------------------------------------------------------------------------
 
@@ -347,7 +457,7 @@ export interface WithdrawPlanInput {
   destination: Address;
   /** cUSDC leaving the confidential balance; the destination gets it less the fee. */
   amount: bigint;
-  vexaAccount?: Address;
+  discountAccounts?: Address[];
   decimals: number;
   proofs: {
     equalityProof: Uint8Array;
@@ -381,7 +491,7 @@ export async function withdrawPlan(input: WithdrawPlanInput): Promise<Plan> {
       ownerCusdc: input.ownerCusdc,
       destination: input.destination,
       amount: input.amount,
-      vexaAccount: input.vexaAccount,
+      discountAccounts: input.discountAccounts,
     }),
     closeContextStateInstruction(equality.address, input.feePayer, input.feePayer),
     closeContextStateInstruction(range.address, input.feePayer, input.feePayer),
@@ -462,16 +572,23 @@ export async function compilePlan(
   for (const stage of plan.stages) {
     const compiled: CompiledTransaction[] = [];
     for (const step of stage) {
-      const message = pipe(
-        createTransactionMessage({ version: 0 }),
-        (m) => setTransactionMessageFeePayerSigner(feePayer, m),
-        (m) =>
-          setTransactionMessageLifetimeUsingBlockhash(
-            { blockhash: opts.blockhash, lastValidBlockHeight: opts.lastValidBlockHeight },
-            m,
-          ),
-        (m) => appendTransactionMessageInstructions(step.instructions, m),
+      const base = pipe(createTransactionMessage({ version: 0 }), (m) =>
+        setTransactionMessageFeePayerSigner(feePayer, m),
       );
+      const timed = step.durableNonce
+        ? setTransactionMessageLifetimeUsingDurableNonce(
+            {
+              nonce: step.durableNonce.nonce as Nonce,
+              nonceAccountAddress: step.durableNonce.nonceAccount,
+              nonceAuthorityAddress: step.durableNonce.authority,
+            },
+            base,
+          )
+        : setTransactionMessageLifetimeUsingBlockhash(
+            { blockhash: opts.blockhash, lastValidBlockHeight: opts.lastValidBlockHeight },
+            base,
+          );
+      const message = appendTransactionMessageInstructions(step.instructions, timed);
       const signed = await partiallySignTransactionMessageWithSigners(message);
       compiled.push({ label: step.label, transaction: getBase64EncodedWireTransaction(signed) });
     }

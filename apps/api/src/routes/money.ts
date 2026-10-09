@@ -17,6 +17,7 @@ import {
   PrepareTransferRequest,
   SubmitPlanRequest,
   SubmitTransferRequest,
+  tierFor,
   validateHandle,
   WithdrawRequest,
   type ChainContext,
@@ -24,9 +25,8 @@ import {
 import {
   decodeConfidentialAccount,
   decodeConfidentialMint,
-  decodeFeeSchedule,
-  feeDiscountBps,
   findAta,
+  findStakeRecord,
   ProofType,
   TOKEN_2022_PROGRAM,
   TOKEN_PROGRAM,
@@ -40,6 +40,9 @@ import { authenticate, principalOf } from '../middleware/auth.js';
 import { idempotent } from '../middleware/idempotency.js';
 import { parseBody } from '../lib/validate.js';
 import { executePlan, PlanFailed } from '../chain/execute.js';
+import { routeAccount } from '../stealth/keys.js';
+import { ensureUsdcAccount } from '../stealth/accounts.js';
+import { readFeeSchedule, readVexaPosition } from '../lib/tier.js';
 import {
   checkPlan,
   SponsorshipRefused,
@@ -67,25 +70,22 @@ async function owner(c: C) {
   };
 }
 
-async function feeSchedule(c: C) {
-  const { chain, vault } = c.get('deps');
-  const data = await chain.getAccountData(vault.fees);
-  return data ? decodeFeeSchedule(data) : null;
-}
+const feeSchedule = (c: C) => readFeeSchedule(c.get('deps'));
+const vexaPosition = (c: C, wallet: Address, fees: Awaited<ReturnType<typeof feeSchedule>>) =>
+  readVexaPosition(c.get('deps'), wallet, fees);
 
-/** The discount a user's $VEXA (a classic SPL token account) earns them. */
+/** The accounts to present to the vault for a fee discount, if any is earned. */
 async function vexaDiscount(
   c: C,
   wallet: Address,
   fees: Awaited<ReturnType<typeof feeSchedule>>,
-): Promise<{ vexaAccount: Address; discountBps: number } | null> {
-  if (!fees?.vexaMint || fees.tiers.length === 0) return null;
-  const vexaAccount = await findAta(wallet, fees.vexaMint, TOKEN_PROGRAM);
-  const data = await c.get('deps').chain.getAccountData(vexaAccount);
-  if (!data || data.length < 72) return null;
-  const balance = new DataView(data.buffer, data.byteOffset).getBigUint64(64, true);
-  const discountBps = feeDiscountBps(fees, balance);
-  return discountBps > 0 ? { vexaAccount, discountBps } : null;
+): Promise<{ accounts: Address[]; discountBps: number } | null> {
+  const position = await vexaPosition(c, wallet, fees);
+  if (!position || position.discountBps === 0) return null;
+  const accounts = [position.stakeRecord, position.walletAccount].filter(
+    (a): a is Address => a !== null,
+  );
+  return { accounts, discountBps: position.discountBps };
 }
 
 async function sponsorContext(
@@ -144,7 +144,7 @@ async function run(c: C, stages: CheckedTransaction[][]): Promise<string[]> {
 }
 
 /** Plans the API takes as-is, with no bookkeeping beyond the signatures. */
-function planRoute(kind: 'configure' | 'apply-pending') {
+function planRoute(kind: 'configure' | 'apply-pending' | 'stake' | 'unstake') {
   return async (c: C) => {
     const { plan } = await parseBody(c, SubmitPlanRequest);
     if (plan.kind !== kind)
@@ -154,6 +154,9 @@ function planRoute(kind: 'configure' | 'apply-pending') {
     if (kind === 'configure') {
       // Rent is only sponsored for an account that doesn't exist yet.
       extra.sponsorAccountRent = (await c.get('deps').chain.getAccountData(me.cusdc)) === null;
+    }
+    if (kind === 'stake' || kind === 'unstake') {
+      extra.stakeRecord = await findStakeRecord(me.wallet, c.get('deps').vault.program);
     }
     const signatures = await run(c, check(plan.stages, await sponsorContext(c, kind, me, extra)));
     return c.json({ signatures }, 201);
@@ -261,6 +264,31 @@ export const money = new Hono<AppBindings>()
   .post('/accounts/confidential', authenticate(), idempotent(), planRoute('configure'))
   .post('/balance/apply', authenticate(), idempotent(), planRoute('apply-pending'))
 
+  /**
+   * The user's $VEXA tier: staked and wallet $VEXA, the weight they add up to
+   * (staked in full, wallet at half), and what that tier unlocks.
+   */
+  .get('/tier', authenticate(), async (c) => {
+    const me = await owner(c);
+    const position = await vexaPosition(c, me.wallet, await feeSchedule(c));
+    const tier = tierFor(position?.weight ?? 0n);
+    return c.json({
+      vexaMint: position?.vexaMint ?? null,
+      staked: (position?.staked ?? 0n).toString(),
+      held: (position?.held ?? 0n).toString(),
+      weight: (position?.weight ?? 0n).toString(),
+      unlockAt: position?.unlockAt ? new Date(position.unlockAt * 1000).toISOString() : null,
+      tier: {
+        level: tier.level,
+        discountBps: tier.discountBps,
+        maxAgents: tier.maxAgents,
+        agentDailyLimit: tier.agentDailyLimit.toString(),
+      },
+    });
+  })
+  .post('/stake', authenticate(), idempotent(), planRoute('stake'))
+  .post('/unstake', authenticate(), idempotent(), planRoute('unstake'))
+
   .post('/deposits', authenticate(), idempotent(), async (c) => {
     const { store } = c.get('deps');
     const { plan } = await parseBody(c, SubmitPlanRequest);
@@ -333,23 +361,53 @@ export const money = new Hono<AppBindings>()
   .post('/transfers/prepare', authenticate(), idempotent(), async (c) => {
     const { store, chain, vault } = c.get('deps');
     const body = await parseBody(c, PrepareTransferRequest);
+    const stealth = body.mode === 'stealth' ? c.get('deps').stealth : null;
     if (body.mode === 'stealth') {
-      throw new ApiError(
-        400,
-        ErrorCode.InvalidRequest,
-        'Stealth transfers arrive with agents in the next release',
-      );
+      if (!stealth) throw notFound('Stealth transfers');
+      if (body.agentId || body.to.startsWith('agent:'))
+        throw new ApiError(400, ErrorCode.InvalidRequest, 'Stealth transfers are between handles');
     }
     const me = await owner(c);
-    const parsed = validateHandle(body.to);
-    const recipient = parsed.ok ? await store.handles.resolve(parsed.handle) : null;
-    if (!recipient) throw notFound('Recipient');
+    const { userId } = principalOf(c);
+
+    // The payer: the user, or one of their agents.
+    let payer = { cusdc: me.cusdc, agentId: null as string | null };
+    if (body.agentId) {
+      const agent = await store.agents.get(userId, body.agentId);
+      if (!agent) throw notFound('Agent');
+      payer = { cusdc: address(agent.cusdcAccount), agentId: agent.id };
+    }
+
+    // The recipient: a handle, or (to fund it) one of the user's own agents.
+    let recipient: {
+      handle: string | null;
+      solanaPubkey: string;
+      elgamalPubkey: string;
+      ownerId: string | null;
+      agentId?: string;
+    };
+    if (body.to.startsWith('agent:')) {
+      const agent = await store.agents.get(userId, body.to.slice('agent:'.length));
+      if (!agent) throw notFound('Agent');
+      recipient = {
+        handle: null,
+        solanaPubkey: agent.solanaPubkey,
+        elgamalPubkey: agent.elgamalPubkey,
+        ownerId: userId,
+        agentId: agent.id,
+      };
+    } else {
+      const parsed = validateHandle(body.to);
+      const resolved = parsed.ok ? await store.handles.resolve(parsed.handle) : null;
+      if (!resolved) throw notFound('Recipient');
+      recipient = { ...resolved, ownerId: await recipientOwnerId(c, resolved.handle) };
+    }
     const recipientCusdc = await findAta(
       address(recipient.solanaPubkey),
       vault.cusdcMint,
       TOKEN_2022_PROGRAM,
     );
-    if (recipientCusdc === me.cusdc)
+    if (recipientCusdc === payer.cusdc)
       throw new ApiError(400, ErrorCode.InvalidRequest, 'Cannot send to yourself');
 
     const data = await chain.getAccountData(recipientCusdc);
@@ -357,23 +415,46 @@ export const money = new Hono<AppBindings>()
       throw new ApiError(
         409,
         ErrorCode.RecipientNotReady,
-        `${formatHandle(recipient.handle)} can’t receive yet`,
+        `${recipient.handle ? formatHandle(recipient.handle) : 'The agent'} can’t receive yet`,
       );
     }
-    const recipientProfileId = await recipientOwnerId(c, recipient.handle);
     const transfer = await store.money.createTransfer({
       fromOwnerId: me.userId,
-      fromPubkey: me.cusdc,
-      toOwnerId: recipientProfileId,
+      fromAgentId: payer.agentId,
+      toAgentId: recipient.agentId ?? null,
+      fromPubkey: payer.cusdc,
+      toOwnerId: recipient.ownerId,
       toHandle: recipient.handle,
       toPubkey: recipientCusdc,
-      mode: 'standard',
+      mode: body.mode,
     });
+
+    // Stealth: the sender withdraws to a one-time entry address, which the
+    // stealth worker routes through Zcash. Its USDC account is created now so
+    // the withdrawal has somewhere to land (the rent comes back at cleanup).
+    let depositAccount: Address | undefined;
+    if (stealth) {
+      const [entry, exit] = await Promise.all([
+        routeAccount(stealth.seed, transfer.id, 'entry'),
+        routeAccount(stealth.seed, transfer.id, 'exit'),
+      ]);
+      depositAccount = await ensureUsdcAccount({ chain, vault }, entry.signer.address);
+      await store.stealth.create({
+        transferId: transfer.id,
+        senderId: me.userId,
+        entryAddress: entry.signer.address,
+        exitAddress: exit.signer.address,
+        recipientCusdc,
+        senderCusdc: me.cusdc,
+      });
+    }
     return c.json(
       {
         transferId: transfer.id,
+        mode: body.mode,
+        ...(depositAccount ? { stealth: { depositAccount } } : {}),
         recipient: {
-          handle: formatHandle(recipient.handle),
+          handle: recipient.handle ? formatHandle(recipient.handle) : null,
           solanaPubkey: recipient.solanaPubkey,
           elgamalPubkey: recipient.elgamalPubkey,
           cusdcAccount: recipientCusdc,
@@ -387,11 +468,19 @@ export const money = new Hono<AppBindings>()
   .post('/transfers/submit', authenticate(), idempotent(), async (c) => {
     const { store, chain, vault } = c.get('deps');
     const body = await parseBody(c, SubmitTransferRequest);
-    if (body.plan.kind !== 'transfer')
-      throw new ApiError(400, ErrorCode.PlanRefused, 'expected a transfer plan');
     const me = await owner(c);
     const transfer = await store.money.getTransfer(body.transferId, me.userId);
     if (!transfer) throw notFound('Transfer');
+    if (transfer.mode === 'stealth') return submitStealth(c, me, transfer, body);
+    if (body.plan.kind !== 'transfer')
+      throw new ApiError(400, ErrorCode.PlanRefused, 'expected a transfer plan');
+    if (transfer.fromAgentId) {
+      throw new ApiError(
+        400,
+        ErrorCode.InvalidRequest,
+        'An agent’s payment is submitted with POST /v1/agents/{id}/payments',
+      );
+    }
     if (transfer.status !== 'pending') {
       throw new ApiError(
         409,
@@ -407,7 +496,11 @@ export const money = new Hono<AppBindings>()
 
     // Bind the ciphertexts we'll store to the real parties before sending.
     const proof = validityContext(checked);
-    const recipient = transfer.toHandle ? await store.handles.resolve(transfer.toHandle) : null;
+    const recipient = transfer.toHandle
+      ? await store.handles.resolve(transfer.toHandle)
+      : transfer.toAgentId
+        ? await store.agents.get(me.userId, transfer.toAgentId)
+        : null;
     const mint = await chain.getAccountData(vault.cusdcMint);
     const auditor =
       (mint && decodeConfidentialMint(mint)?.auditorElgamalPubkey) ?? new Uint8Array(32);
@@ -455,6 +548,21 @@ export const money = new Hono<AppBindings>()
     return c.json(transferJson(settled, 'sent'), 201);
   })
 
+  /** A transfer you sent, with its stealth route's progress if it has one. */
+  .get('/transfers/:id', authenticate(), async (c) => {
+    const { store } = c.get('deps');
+    const { userId } = principalOf(c);
+    const transfer = await store.money.getTransfer(c.req.param('id'), userId);
+    if (!transfer) throw notFound('Transfer');
+    const route = transfer.mode === 'stealth' ? await store.stealth.get(transfer.id, userId) : null;
+    return c.json({
+      ...transferJson(transfer, 'sent'),
+      ...(route
+        ? { stealth: { status: route.status, updatedAt: route.updatedAt.toISOString() } }
+        : {}),
+    });
+  })
+
   /**
    * Transfers sent and received, deposits and withdrawals, newest first.
    * Transfer amounts come as grouped ciphertexts: the sender decrypts with
@@ -500,6 +608,50 @@ function transferJson(t: TransferRow, direction: 'sent' | 'received') {
     txSig: t.txSig,
     createdAt: t.createdAt.toISOString(),
   };
+}
+
+/**
+ * A stealth transfer's first leg: the sender's withdrawal to the route's
+ * entry address. From there the stealth worker takes over.
+ */
+async function submitStealth(
+  c: C,
+  me: Awaited<ReturnType<typeof owner>>,
+  transfer: TransferRow,
+  body: SubmitTransferRequest,
+) {
+  const { store, vault } = c.get('deps');
+  if (body.plan.kind !== 'withdraw')
+    throw new ApiError(
+      400,
+      ErrorCode.PlanRefused,
+      'a stealth transfer starts with a withdraw plan',
+    );
+  if (transfer.status !== 'pending')
+    throw new ApiError(
+      409,
+      ErrorCode.TransferAlreadySubmitted,
+      'This transfer was already submitted',
+    );
+  const route = await store.stealth.get(transfer.id, me.userId);
+  if (!route) throw notFound('Stealth route');
+  const entryUsdc = await findAta(address(route.entryAddress), vault.usdcMint, TOKEN_PROGRAM);
+  const checked = check(
+    body.plan.stages,
+    await sponsorContext(c, 'withdraw', me, { counterparty: entryUsdc }),
+  );
+  await store.money.markTransferSubmitted(transfer.id);
+  let signatures: string[];
+  try {
+    signatures = await run(c, checked);
+  } catch (e) {
+    await store.money.failTransfer(transfer.id, e instanceof Error ? e.message : 'failed', []);
+    throw e;
+  }
+  if (body.senderNote)
+    await store.money.addTransferCiphertext(transfer.id, { senderNote: body.senderNote });
+  await store.stealth.update(transfer.id, { signatures, nextAttemptAt: new Date() });
+  return c.json({ id: transfer.id, mode: 'stealth', status: 'submitted', signatures }, 202);
 }
 
 async function recipientOwnerId(c: C, handle: string): Promise<string | null> {

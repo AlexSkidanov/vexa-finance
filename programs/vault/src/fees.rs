@@ -13,7 +13,8 @@
 //! Rounding up means every non-empty movement pays at least one base unit
 //! while a fee is set, so splitting a deposit into dust doesn't dodge it. The
 //! discount comes from the best tier whose `min_balance` the owner's $VEXA
-//! account meets, and is rounded in the vault's favour too.
+//! weight meets (staked in full, held in the wallet at half: see
+//! `crate::stake`), and is rounded in the vault's favour too.
 //!
 //! The schedule lives in its own PDA, `["fees"]`. Everything after the
 //! treasury is exactly the `SetFees` argument payload, so setting the fees is
@@ -177,14 +178,14 @@ impl FeeSchedule {
     /// The fee on `amount`, given the owner's $VEXA balance. Plain `u64`
     /// arithmetic: 128-bit division would pull a large routine into the
     /// program and cost rent on every byte.
-    pub fn fee(&self, amount: u64, vexa_balance: u64) -> u64 {
+    pub fn fee(&self, amount: u64, vexa_weight: u64) -> u64 {
         // An amount so large that `amount × fee_bps` overflows is far past any cap.
         let raw = amount.checked_mul(self.fee_bps()).map_or(u64::MAX, |x| x.div_ceil(BPS));
         let capped = raw.min(self.fee_cap());
         let discount = self
             .tiers()
             .rev()
-            .find(|(min, _)| vexa_balance >= *min)
+            .find(|(min, _)| vexa_weight >= *min)
             .map_or(0, |(_, discount)| discount);
         // ⌊capped × discount / 10 000⌋ without overflow. Rounding the discount
         // down rounds the fee up.

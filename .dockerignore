@@ -1,0 +1,9 @@
+**/node_modules
+**/dist
+**/.turbo
+target
+contracts/near-policy/target
+.env
+.env.*
+!.env.example
+.git

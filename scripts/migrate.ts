@@ -95,7 +95,7 @@ async function reportInvariants(db: postgres.Sql | postgres.TransactionSql) {
   const secretColumns = await db<{ col: string; readable: boolean }[]>`
     select t.tbl || '.' || t.col as col,
            has_column_privilege('authenticated', 'public.' || t.tbl, t.col, 'select') as readable
-    from (values ('api_keys', 'key_hash'), ('view_keys', 'encrypted_key'),
+    from (values ('api_keys', 'key_hash'), ('view_keys', 'encrypted_key'), ('view_keys', 'access_hash'),
                  ('webhooks', 'secret_encrypted'), ('webauthn_credentials', 'public_key')) as t(tbl, col)
     where exists (select 1 from information_schema.tables
                   where table_schema = 'public' and table_name = t.tbl)`;

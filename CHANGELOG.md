@@ -15,6 +15,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Vault v0.3.0 (the protocol fee) upgraded in place, with the fee schedule set to 0.10% capped at
   5 USDC.
 
+### Added (Phase 3)
+
+- **Agents**: sub-accounts whose Solana key is a NEAR MPC key (`v1.signer`), signed only through the
+  new `near-policy` contract, which enforces per-payment and rolling 24-hour limits on the
+  payment's hidden amount with a range proof over Pedersen commitments, recipient and domain
+  allow-lists, pause and revoke. Agent proofs come from `crates/agent-proofs` (solana-zk-sdk 7 in
+  WebAssembly) with openings derived per payment. The vault's `RequireContexts` binds each payment
+  to the proofs NEAR approved.
+- **x402**: `VexaAgent.fetch()` pays `402 Payment Required` responses in the `vexa` scheme and logs
+  every step to `agent_traces`.
+- **Stealth transfers** through the Zcash shielded pool with NEAR Intents 1Click, with a refund
+  path, run by an API worker driving a zingolib wallet over the Nym mixnet.
+- **View keys** and signed audit exports, decrypted on the auditor's device.
+- **$VEXA**: staking in the vault with a 7-day lock, tiers from staked + wallet ÷ 2 for fee
+  discounts (10/25/50/75%) and agent limits, and `pnpm token:create`.
+- Card and KYC interfaces with mock implementations.
+
 ### Added
 
 - **Confidential transfers** between handles, with proofs built on the device and end-to-end

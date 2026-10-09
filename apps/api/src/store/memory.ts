@@ -2,6 +2,11 @@ import { randomUUID } from 'node:crypto';
 import {
   HandleConflict,
   type ActivityItem,
+  type AgentRow,
+  type AgentTraceRow,
+  type AuditRow,
+  type StealthRouteRow,
+  type ViewKeyRow,
   type EventRow,
   type MovementRow,
   type DueDelivery,
@@ -35,6 +40,12 @@ export function createMemoryStore(): Store {
   const passkeys = new Map<string, PasskeyRow>();
   const challenges = new Map<string, { userId: string | null; kind: string; challenge: string }>();
   const transfers = new Map<string, TransferRow>();
+  const agents = new Map<string, AgentRow>();
+  const agentPayments: { transferId: string; agentId: string; index: number }[] = [];
+  const traces: AgentTraceRow[] = [];
+  const stealthRoutes = new Map<string, StealthRouteRow & { due: number; lease: number }>();
+  const viewKeys = new Map<string, ViewKeyRow & { accessHash: string }>();
+  const viewRecords = new Map<string, Map<string, Uint8Array>>();
   const deposits: MovementRow[] = [];
   const withdrawals: MovementRow[] = [];
   const events: EventRow[] = [];
@@ -201,6 +212,8 @@ export function createMemoryStore(): Store {
         const row: TransferRow = {
           id: randomUUID(),
           ...t,
+          fromAgentId: t.fromAgentId ?? null,
+          toAgentId: t.toAgentId ?? null,
           ciphertext: {},
           status: 'pending',
           txSig: null,
@@ -228,6 +241,27 @@ export function createMemoryStore(): Store {
       async failTransfer(id, reason, signatures) {
         const t = transfers.get(id);
         if (t) Object.assign(t, { status: 'failed', failureReason: reason, signatures });
+      },
+      async setTransferStatus(id, status) {
+        const t = transfers.get(id);
+        if (t) t.status = status as TransferRow['status'];
+      },
+      async addTransferCiphertext(id, ciphertext) {
+        const t = transfers.get(id);
+        if (t) t.ciphertext = { ...t.ciphertext, ...ciphertext };
+      },
+      async transferById(id) {
+        return transfers.get(id) ?? null;
+      },
+      async recordAgentPayment(p) {
+        agentPayments.push(p);
+      },
+      async agentPayments(agentId, fromIndex) {
+        return agentPayments
+          .filter((p) => p.agentId === agentId && p.index >= fromIndex)
+          .map((p) => ({ index: p.index, transfer: transfers.get(p.transferId)! }))
+          .filter((p) => p.transfer.status === 'settled')
+          .sort((a, b) => a.index - b.index);
       },
       async recordDeposit({ ownerId, txSig, status }) {
         const row: MovementRow = {
@@ -281,6 +315,164 @@ export function createMemoryStore(): Store {
           .filter((i) => at(i).getTime() < cutoff)
           .sort((a, b) => at(b).getTime() - at(a).getTime())
           .slice(0, limit);
+      },
+    },
+
+    agents: {
+      async create(a) {
+        const row: AgentRow = {
+          ...a,
+          status: 'active',
+          policy: { ...a.policy, version: 1 },
+          createdAt: new Date(),
+        };
+        agents.set(row.id, row);
+        return row;
+      },
+      async get(ownerId, id) {
+        const a = agents.get(id);
+        return a && a.ownerId === ownerId ? a : null;
+      },
+      async list(ownerId) {
+        return [...agents.values()].filter((a) => a.ownerId === ownerId);
+      },
+      async countLive(ownerId) {
+        return [...agents.values()].filter((a) => a.ownerId === ownerId && a.status !== 'revoked')
+          .length;
+      },
+      async setPolicy(agentId, policy) {
+        const a = agents.get(agentId)!;
+        a.policy = { ...policy, version: a.policy.version + 1 };
+        return a.policy;
+      },
+      async setStatus(agentId, status) {
+        const a = agents.get(agentId);
+        if (a) a.status = status;
+      },
+      async trace(t) {
+        const row: AgentTraceRow = {
+          id: randomUUID(),
+          agentId: t.agentId,
+          requestId: t.requestId,
+          step: t.step,
+          detail: t.detail,
+          createdAt: new Date(),
+        };
+        traces.push(row);
+        return row;
+      },
+      async traces(agentId, { limit, requestId }) {
+        return traces
+          .filter((t) => t.agentId === agentId && (!requestId || t.requestId === requestId))
+          .reverse()
+          .slice(0, limit);
+      },
+    },
+
+    stealth: {
+      async create(r) {
+        const row = {
+          ...r,
+          status: 'awaiting_funds' as const,
+          zcashAddress: null,
+          leg1DepositAddress: null,
+          leg2DepositAddress: null,
+          zcashTxid: null,
+          leg2Attempts: 0,
+          attempts: 0,
+          lastError: null,
+          signatures: [],
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          due: Date.now(),
+          lease: 0,
+        };
+        stealthRoutes.set(r.transferId, row);
+        return row;
+      },
+      async get(transferId, senderId) {
+        const r = stealthRoutes.get(transferId);
+        return r && r.senderId === senderId ? r : null;
+      },
+      async claimDue(limit, leaseSeconds) {
+        const now = Date.now();
+        const due = [...stealthRoutes.values()]
+          .filter(
+            (r) =>
+              !['settled', 'refunded', 'failed'].includes(r.status) &&
+              r.due <= now &&
+              r.lease <= now,
+          )
+          .slice(0, limit);
+        for (const r of due) r.lease = now + leaseSeconds * 1000;
+        return due;
+      },
+      async update(transferId, patch) {
+        const r = stealthRoutes.get(transferId);
+        if (!r) return;
+        const { nextAttemptAt, ...rest } = patch;
+        Object.assign(r, rest, { updatedAt: new Date(), lease: 0 });
+        if (nextAttemptAt) r.due = nextAttemptAt.getTime();
+      },
+    },
+
+    viewKeys: {
+      async create(v) {
+        const row = { ...v, revokedAt: null, createdAt: new Date() };
+        viewKeys.set(v.id, row);
+        viewRecords.set(v.id, new Map());
+        return row;
+      },
+      async list(ownerId) {
+        return [...viewKeys.values()].filter((v) => v.ownerId === ownerId);
+      },
+      async get(ownerId, id) {
+        const v = viewKeys.get(id);
+        return v && v.ownerId === ownerId ? v : null;
+      },
+      async revoke(ownerId, id) {
+        const v = viewKeys.get(id);
+        if (!v || v.ownerId !== ownerId || v.revokedAt) return false;
+        v.revokedAt = new Date();
+        viewRecords.get(id)?.clear();
+        return true;
+      },
+      async recordedTransferIds(id) {
+        return [...(viewRecords.get(id)?.keys() ?? [])];
+      },
+      async addRecords(key, records) {
+        const map = viewRecords.get(key.id)!;
+        let added = 0;
+        for (const r of records) {
+          const t = transfers.get(r.transferId);
+          const mine = t && (t.fromOwnerId === key.ownerId || t.toOwnerId === key.ownerId);
+          const inScope = t && t.createdAt >= key.scopeFrom && t.createdAt < key.scopeTo;
+          if (mine && inScope && !map.has(r.transferId)) {
+            map.set(r.transferId, r.record);
+            added++;
+          }
+        }
+        return added;
+      },
+      async byAccessHash(hash) {
+        return [...viewKeys.values()].find((v) => v.accessHash === hash && !v.revokedAt) ?? null;
+      },
+      async exportRows(key) {
+        const rows: AuditRow[] = [];
+        for (const [transferId, record] of viewRecords.get(key.id) ?? []) {
+          const t = transfers.get(transferId);
+          if (!t || t.createdAt < key.scopeFrom || t.createdAt >= key.scopeTo) continue;
+          const sent = t.fromOwnerId === key.ownerId;
+          rows.push({
+            transferId,
+            createdAt: t.createdAt,
+            direction: sent ? 'sent' : 'received',
+            counterparty: sent ? (t.toHandle ?? t.toPubkey) : t.fromPubkey,
+            txSig: t.txSig,
+            record,
+          });
+        }
+        return rows.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
       },
     },
 

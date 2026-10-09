@@ -56,12 +56,24 @@ export class HandleConflict extends Error {
   }
 }
 
-export type TransferStatus = 'pending' | 'submitted' | 'settled' | 'failed';
+export type TransferStatus =
+  | 'pending'
+  | 'submitted'
+  | 'settled'
+  | 'failed'
+  | 'routing'
+  | 'shielded'
+  | 'returning'
+  | 'refunded';
 
 /** Transfer amounts exist only inside `ciphertext`. */
 export interface TransferRow {
   id: string;
   fromOwnerId: string | null;
+  /** Set when an agent of `fromOwnerId` made the payment. */
+  fromAgentId: string | null;
+  /** Set when the recipient is an agent (its owner funding it). */
+  toAgentId: string | null;
   fromPubkey: string;
   toOwnerId: string | null;
   toHandle: string | null;
@@ -91,6 +103,119 @@ export type ActivityItem =
   | { kind: 'transfer'; direction: 'sent' | 'received'; transfer: TransferRow }
   | { kind: 'deposit'; movement: MovementRow }
   | { kind: 'withdrawal'; movement: MovementRow };
+
+export type AgentStatus = 'active' | 'paused' | 'revoked';
+
+/** Limits are configuration, public on NEAR anyway: not balances. */
+export interface PolicyRow {
+  version: number;
+  /** USDC base units. */
+  maxPerRequest: bigint;
+  dailyLimit: bigint;
+  allowedRecipients: string[];
+  allowedDomains: string[];
+}
+
+export interface AgentRow {
+  id: string;
+  ownerId: string;
+  name: string | null;
+  /** The agent's MPC-derived Solana address. */
+  solanaPubkey: string;
+  cusdcAccount: string;
+  nonceAccount: string;
+  authority: string;
+  elgamalPubkey: string;
+  status: AgentStatus;
+  policy: PolicyRow;
+  createdAt: Date;
+}
+
+export type TraceStep =
+  | 'request'
+  | 'payment_required'
+  | 'quote'
+  | 'policy_check'
+  | 'paid'
+  | 'retried'
+  | 'completed'
+  | 'failed';
+
+export interface AgentTraceRow {
+  id: string;
+  agentId: string;
+  requestId: string | null;
+  step: TraceStep;
+  detail: Record<string, unknown>;
+  createdAt: Date;
+}
+
+export interface ViewKeyRow {
+  id: string;
+  ownerId: string;
+  label: string | null;
+  scopeFrom: Date;
+  scopeTo: Date;
+  revokedAt: Date | null;
+  createdAt: Date;
+}
+
+/** One exported row: public transfer metadata and the owner-encrypted record. */
+export interface AuditRow {
+  transferId: string;
+  createdAt: Date;
+  direction: 'sent' | 'received';
+  counterparty: string;
+  txSig: string | null;
+  record: Uint8Array;
+}
+
+export type StealthStatus =
+  | 'awaiting_funds'
+  | 'routing'
+  | 'shielded'
+  | 'returning'
+  | 'settling'
+  | 'settled'
+  | 'refunding'
+  | 'refunded'
+  | 'failed';
+
+/** A stealth route: addresses and statuses only, never an amount. */
+export interface StealthRouteRow {
+  transferId: string;
+  senderId: string;
+  status: StealthStatus;
+  entryAddress: string;
+  exitAddress: string;
+  zcashAddress: string | null;
+  leg1DepositAddress: string | null;
+  leg2DepositAddress: string | null;
+  zcashTxid: string | null;
+  leg2Attempts: number;
+  recipientCusdc: string;
+  senderCusdc: string;
+  attempts: number;
+  lastError: string | null;
+  signatures: string[];
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export type StealthRoutePatch = Partial<
+  Pick<
+    StealthRouteRow,
+    | 'status'
+    | 'zcashAddress'
+    | 'leg1DepositAddress'
+    | 'leg2DepositAddress'
+    | 'zcashTxid'
+    | 'leg2Attempts'
+    | 'attempts'
+    | 'lastError'
+    | 'signatures'
+  >
+> & { nextAttemptAt?: Date };
 
 export interface EventRow {
   id: string;
@@ -192,6 +317,8 @@ export interface Store {
       toHandle: string | null;
       toPubkey: string;
       mode: 'standard' | 'stealth';
+      fromAgentId?: string | null;
+      toAgentId?: string | null;
     }): Promise<TransferRow>;
     /** Only returns the transfer if `ownerId` sent it. */
     getTransfer(id: string, ownerId: string): Promise<TransferRow | null>;
@@ -206,6 +333,15 @@ export interface Store {
       },
     ): Promise<TransferRow>;
     failTransfer(id: string, reason: string, signatures: string[]): Promise<void>;
+    /** Stealth transfers move through routing, shielded, returning and refunded too. */
+    setTransferStatus(
+      id: string,
+      status: 'submitted' | 'routing' | 'shielded' | 'returning' | 'refunded' | 'failed',
+    ): Promise<void>;
+    /** Merges into the transfer's ciphertext JSON (e.g. the sender's own note). */
+    addTransferCiphertext(id: string, ciphertext: Record<string, string>): Promise<void>;
+    /** Any transfer by id, for the stealth worker. */
+    transferById(id: string): Promise<TransferRow | null>;
     recordDeposit(input: {
       ownerId: string;
       txSig: string | null;
@@ -218,8 +354,88 @@ export interface Store {
       txSig: string | null;
       status: MovementRow['status'];
     }): Promise<MovementRow>;
+    /** Records which payment index an agent's transfer used. */
+    recordAgentPayment(input: {
+      transferId: string;
+      agentId: string;
+      index: number;
+    }): Promise<void>;
+    /** An agent's settled payments with index ≥ `fromIndex`, lowest first. */
+    agentPayments(
+      agentId: string,
+      fromIndex: number,
+    ): Promise<{ index: number; transfer: TransferRow }[]>;
     /** Newest first; transfers the user sent or received, plus their deposits and withdrawals. */
     activity(userId: string, opts: { limit: number; before?: Date }): Promise<ActivityItem[]>;
+  };
+
+  agents: {
+    create(
+      input: Omit<AgentRow, 'status' | 'createdAt' | 'policy'> & {
+        policy: Omit<PolicyRow, 'version'>;
+      },
+    ): Promise<AgentRow>;
+    /** Only returns the agent if `ownerId` owns it. */
+    get(ownerId: string, id: string): Promise<AgentRow | null>;
+    list(ownerId: string): Promise<AgentRow[]>;
+    /** Agents that aren't revoked: what counts against the tier's agent limit. */
+    countLive(ownerId: string): Promise<number>;
+    /** Appends a policy version. */
+    setPolicy(agentId: string, policy: Omit<PolicyRow, 'version'>): Promise<PolicyRow>;
+    setStatus(agentId: string, status: AgentStatus): Promise<void>;
+    trace(input: {
+      agentId: string;
+      ownerId: string;
+      requestId: string | null;
+      step: TraceStep;
+      detail: Record<string, unknown>;
+    }): Promise<AgentTraceRow>;
+    traces(agentId: string, opts: { limit: number; requestId?: string }): Promise<AgentTraceRow[]>;
+  };
+
+  viewKeys: {
+    create(input: {
+      id: string;
+      ownerId: string;
+      label: string | null;
+      scopeFrom: Date;
+      scopeTo: Date;
+      accessHash: string;
+    }): Promise<ViewKeyRow>;
+    list(ownerId: string): Promise<ViewKeyRow[]>;
+    get(ownerId: string, id: string): Promise<ViewKeyRow | null>;
+    /** Revokes the key and deletes its records. False if it wasn't theirs or was already revoked. */
+    revoke(ownerId: string, id: string): Promise<boolean>;
+    recordedTransferIds(id: string): Promise<string[]>;
+    /**
+     * Stores records for transfers the key's owner sent or received within its
+     * scope; ignores anything else, and transfers already recorded.
+     */
+    addRecords(
+      key: ViewKeyRow,
+      records: { transferId: string; record: Uint8Array }[],
+    ): Promise<number>;
+    /** An unrevoked key by the hash of its access secret. */
+    byAccessHash(hash: string): Promise<ViewKeyRow | null>;
+    exportRows(key: ViewKeyRow): Promise<AuditRow[]>;
+  };
+
+  stealth: {
+    create(
+      input: Pick<
+        StealthRouteRow,
+        | 'transferId'
+        | 'senderId'
+        | 'entryAddress'
+        | 'exitAddress'
+        | 'recipientCusdc'
+        | 'senderCusdc'
+      >,
+    ): Promise<StealthRouteRow>;
+    get(transferId: string, senderId: string): Promise<StealthRouteRow | null>;
+    /** Leases up to `limit` due routes that aren't finished. */
+    claimDue(limit: number, leaseSeconds: number): Promise<StealthRouteRow[]>;
+    update(transferId: string, patch: StealthRoutePatch): Promise<void>;
   };
 
   events: {

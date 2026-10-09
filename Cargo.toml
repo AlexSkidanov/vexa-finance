@@ -1,8 +1,8 @@
 [workspace]
-members = ["programs/*"]
+members = ["programs/*", "crates/*"]
 # The NEAR policy contract builds for wasm32 with its own toolchain (cargo-near)
 # and is kept out of the Solana workspace.
-exclude = ["contracts/*"]
+exclude = ["contracts/near-policy"]
 resolver = "2"
 
 [workspace.package]

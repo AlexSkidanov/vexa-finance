@@ -559,6 +559,202 @@ fn a_vault_without_a_fee_schedule_moves_nothing() {
 }
 
 // ---------------------------------------------------------------------------
+// $VEXA staking
+// ---------------------------------------------------------------------------
+
+#[test]
+fn staking_locks_vexa_for_a_week() {
+    let mut env = setup();
+    let mint = env.launch_vexa();
+    let alice = env.user(1);
+    let sponsor = Keypair::new();
+    env.svm.airdrop(&sponsor.pubkey(), 1_000_000_000).unwrap();
+    env.give_vexa(&mint, &alice, 5_000 * USDC);
+
+    // The sponsor pays for the record and the vault; Alice needs no SOL.
+    let ix = env.stake_ix(&mint, &alice, &sponsor.pubkey(), 3_000 * USDC);
+    env.send(&[ix], &sponsor, &[&alice.kp]).unwrap();
+    assert_eq!(env.staked(&alice.kp.pubkey()), 3_000 * USDC);
+    assert_eq!(env.usdc_balance(&env.stake_vault(&mint)), 3_000 * USDC);
+
+    let err = env.send(&[env.unstake_ix(&mint, &alice, USDC)], &alice.kp, &[]).unwrap_err();
+    assert!(err.contains(&code(VaultError::StakeLocked)), "{err}");
+
+    env.warp(vault::stake::STAKE_LOCK_SECONDS);
+    let err = env.send(&[env.unstake_ix(&mint, &alice, 3_001 * USDC)], &alice.kp, &[]).unwrap_err();
+    assert!(err.contains(&code(VaultError::InsufficientStake)), "{err}");
+    env.send(&[env.unstake_ix(&mint, &alice, 1_000 * USDC)], &alice.kp, &[]).unwrap();
+    assert_eq!(env.staked(&alice.kp.pubkey()), 2_000 * USDC);
+
+    // Topping up relocks the whole position.
+    let ix = env.stake_ix(&mint, &alice, &sponsor.pubkey(), USDC);
+    env.send(&[ix], &sponsor, &[&alice.kp]).unwrap();
+    let err = env.send(&[env.unstake_ix(&mint, &alice, USDC)], &alice.kp, &[]).unwrap_err();
+    assert!(err.contains(&code(VaultError::StakeLocked)), "{err}");
+}
+
+#[test]
+fn staking_needs_a_vexa_mint_and_the_owners_tokens() {
+    let mut env = setup();
+    let alice = env.user(1);
+    let bob = env.user(1);
+    let admin = env.admin.insecure_clone();
+    let mint = create_usdc_mint(&mut env.svm, &admin, &admin.pubkey());
+    env.give_vexa(&mint, &alice, 10 * USDC);
+    // No $VEXA mint in the fee schedule yet.
+    let ix = env.stake_ix(&mint, &alice, &admin.pubkey(), USDC);
+    let err = env.send(&[ix], &admin, &[&alice.kp]).unwrap_err();
+    assert!(err.contains(&code(VaultError::VexaNotSet)), "{err}");
+
+    let mint = env.launch_vexa();
+    env.give_vexa(&mint, &alice, 10 * USDC);
+    // Bob can't stake Alice's tokens into his own record.
+    let mut ix = env.stake_ix(&mint, &bob, &admin.pubkey(), USDC);
+    ix.accounts[5].pubkey = get_associated_token_address_with_program_id(
+        &alice.kp.pubkey(),
+        &mint,
+        &spl_token_interface::id(),
+    );
+    let err = env.send(&[ix], &admin, &[&bob.kp]).unwrap_err();
+    assert!(err.contains(&code(VaultError::TokenOwnerMismatch)), "{err}");
+}
+
+#[test]
+fn stake_counts_in_full_and_wallet_vexa_at_half() {
+    let mut env = setup();
+    let mint = env.launch_vexa();
+    let admin = env.admin.insecure_clone();
+    let alice = env.user(1_000);
+    let wallet = env.give_vexa(&mint, &alice, 20_000 * USDC);
+
+    // 20k in the wallet weighs 10k: 25% off 0.10 USDC.
+    let ix = env.deposit_ix_with(&alice, 100 * USDC, Some(wallet));
+    env.send(&[ix], &alice.kp, &[]).unwrap();
+    assert_eq!(env.usdc_balance(&env.treasury), 75_000);
+
+    // Stake 10k and keep 10k: 10k + 5k = 15k, still the 10k tier.
+    let ix = env.stake_ix(&mint, &alice, &admin.pubkey(), 10_000 * USDC);
+    env.send(&[ix], &admin, &[&alice.kp]).unwrap();
+    let mut ix = env.deposit_ix_with(&alice, 100 * USDC, Some(wallet));
+    ix.accounts.push(AccountMeta::new_readonly(stake_pda(&alice.kp.pubkey()), false));
+    env.send(&[ix], &alice.kp, &[]).unwrap();
+    assert_eq!(env.usdc_balance(&env.treasury), 150_000);
+
+    // Stake the rest: 20k staked, and the stake record alone is enough.
+    let ix = env.stake_ix(&mint, &alice, &admin.pubkey(), 10_000 * USDC);
+    env.send(&[ix], &admin, &[&alice.kp]).unwrap();
+    let ix = env.deposit_ix_with(&alice, 100 * USDC, Some(stake_pda(&alice.kp.pubkey())));
+    env.send(&[ix], &alice.kp, &[]).unwrap();
+    assert_eq!(env.usdc_balance(&env.treasury), 225_000);
+}
+
+#[test]
+fn nobody_can_borrow_someone_elses_stake_for_a_discount() {
+    let mut env = setup();
+    let mint = env.launch_vexa();
+    let admin = env.admin.insecure_clone();
+    let alice = env.user(10);
+    let bob = env.user(10);
+    env.give_vexa(&mint, &alice, 1_000_000 * USDC);
+    let ix = env.stake_ix(&mint, &alice, &admin.pubkey(), 1_000_000 * USDC);
+    env.send(&[ix], &admin, &[&alice.kp]).unwrap();
+
+    let ix = env.deposit_ix_with(&bob, USDC, Some(stake_pda(&alice.kp.pubkey())));
+    let err = env.send(&[ix], &bob.kp, &[]).unwrap_err();
+    assert!(err.contains(&code(VaultError::TokenOwnerMismatch)), "{err}");
+}
+
+// ---------------------------------------------------------------------------
+// proof contexts (agent payments)
+// ---------------------------------------------------------------------------
+
+const ZK_PROGRAM: Pubkey = Pubkey::from_str_const("ZkE1Gama1Proof11111111111111111111111111111");
+/// Range proof U64 context account: authority (32) | proof type (1) | context (264).
+const RANGE_CONTEXT_LEN: usize = 297;
+
+/// Verifies a fresh range proof into a new context account; returns it.
+fn verified_range_context(env: &mut Env, payer: &Keypair, amount: u64) -> Pubkey {
+    let keypair = zk_sdk::encryption::elgamal::ElGamalKeypair::new_rand();
+    let balance = keypair.pubkey().encrypt(amount + 1);
+    let proofs = withdraw_proof_data(&balance, amount + 1, amount, &keypair).unwrap();
+    let context = Keypair::new();
+    let rent = env.svm.minimum_balance_for_rent_exemption(RANGE_CONTEXT_LEN);
+    let create = solana_system_interface::instruction::create_account(
+        &payer.pubkey(),
+        &context.pubkey(),
+        rent,
+        RANGE_CONTEXT_LEN as u64,
+        &ZK_PROGRAM,
+    );
+    let verify = ProofInstruction::VerifyBatchedRangeProofU64.encode_verify_proof(
+        Some(zk_proof_interface::instruction::ContextStateInfo {
+            context_state_account: &context.pubkey(),
+            context_state_authority: &payer.pubkey(),
+        }),
+        &proofs.range_proof_data,
+    );
+    env.send(&[create, verify], payer, &[&context]).unwrap();
+    context.pubkey()
+}
+
+fn require_contexts_ix(contexts: &[(Pubkey, [u8; 32])]) -> Instruction {
+    let data: Vec<u8> = contexts.iter().flat_map(|(_, h)| *h).collect();
+    vault_ix(
+        VaultInstruction::RequireContexts,
+        &data,
+        contexts.iter().map(|(c, _)| AccountMeta::new_readonly(*c, false)).collect(),
+    )
+}
+
+fn context_hash(env: &Env, context: &Pubkey) -> [u8; 32] {
+    use sha2::Digest;
+    let data = env.svm.get_account(context).unwrap().data;
+    sha2::Sha256::digest(&data[32..]).into()
+}
+
+#[test]
+fn require_contexts_passes_only_for_the_exact_verified_proofs() {
+    let mut env = setup();
+    let payer = env.admin.insecure_clone();
+    let first = verified_range_context(&mut env, &payer, 10);
+    let second = verified_range_context(&mut env, &payer, 20);
+    let (h1, h2) = (context_hash(&env, &first), context_hash(&env, &second));
+
+    env.send(&[require_contexts_ix(&[(first, h1), (second, h2)])], &payer, &[]).unwrap();
+
+    // A different proof in the account than the one approved.
+    let err = env.send(&[require_contexts_ix(&[(first, h2)])], &payer, &[]).unwrap_err();
+    assert!(err.contains(&code(VaultError::ContextMismatch)), "{err}");
+
+    // An account that was allocated for a context but never verified into.
+    let empty = Keypair::new();
+    let create = solana_system_interface::instruction::create_account(
+        &payer.pubkey(),
+        &empty.pubkey(),
+        env.svm.minimum_balance_for_rent_exemption(RANGE_CONTEXT_LEN),
+        RANGE_CONTEXT_LEN as u64,
+        &ZK_PROGRAM,
+    );
+    env.send(&[create], &payer, &[&empty]).unwrap();
+    let zeros: [u8; 32] = {
+        use sha2::Digest;
+        sha2::Sha256::digest([0u8; RANGE_CONTEXT_LEN - 32]).into()
+    };
+    let err =
+        env.send(&[require_contexts_ix(&[(empty.pubkey(), zeros)])], &payer, &[]).unwrap_err();
+    assert!(err.contains(&code(VaultError::ContextMismatch)), "{err}");
+
+    // Data that looks right but lives in an account the proof program doesn't own.
+    let err = env.send(&[require_contexts_ix(&[(env.reserve, h1)])], &payer, &[]).unwrap_err();
+    assert!(err.contains(&code(VaultError::ContextMismatch)), "{err}");
+
+    // Hashes and accounts must pair up.
+    let mut ix = require_contexts_ix(&[(first, h1)]);
+    ix.data.pop();
+    assert!(env.send(&[ix], &payer, &[]).is_err());
+}
+
+// ---------------------------------------------------------------------------
 // invariant
 // ---------------------------------------------------------------------------
 

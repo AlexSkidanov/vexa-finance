@@ -1,3 +1,6 @@
+import { transparency } from './routes/transparency.js';
+import { audit, viewKeys } from './routes/view-keys.js';
+import { agents } from './routes/agents.js';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
@@ -31,7 +34,7 @@ export function createApp(deps: Deps) {
     cors({
       origin: deps.env.WEBAUTHN_ORIGINS,
       allowHeaders: ['Authorization', 'Content-Type', 'Idempotency-Key', 'X-Request-Id'],
-      exposeHeaders: ['X-Request-Id', 'Idempotent-Replayed', 'Retry-After'],
+      exposeHeaders: ['X-Request-Id', 'Idempotent-Replayed', 'Retry-After', 'X-Vexa-Signature'],
       maxAge: 600,
     }),
   );
@@ -52,6 +55,10 @@ export function createApp(deps: Deps) {
   app.route('/v1/api-keys', apiKeys);
   app.route('/v1/webhooks', webhooks);
   app.route('/v1/hooks', hooks);
+  app.route('/v1/agents', agents);
+  app.route('/v1/view-keys', viewKeys);
+  app.route('/v1/audit', audit);
+  app.route('/v1/transparency', transparency);
   app.route('/v1', money);
 
   app.onError(onError);

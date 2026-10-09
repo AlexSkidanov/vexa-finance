@@ -44,6 +44,13 @@ export function base58Decode(input: string): Uint8Array | null {
 
 const B64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
+/** base58Decode that throws, for values that must be valid. */
+export function base58DecodeStrict(input: string, what = 'value'): Uint8Array {
+  const bytes = base58Decode(input);
+  if (!bytes) throw new Error(`${what} is not valid base58`);
+  return bytes;
+}
+
 export function base64Encode(bytes: Uint8Array): string {
   let bin = '';
   for (const b of bytes) bin += String.fromCharCode(b);

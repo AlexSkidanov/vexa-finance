@@ -1,0 +1,32 @@
+[package]
+name = "vexa-near-policy"
+version = "0.1.0"
+description = "Agent spend policies for Vexa, enforced before NEAR chain signatures sign an agent's Solana transactions"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/AlexSkidanov/vexa-finance"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = "5.29.1"
+# Ristretto arithmetic on the commitments that hide agent payment amounts, and
+# Edwards arithmetic to derive agent addresses the way the MPC signer does.
+curve25519-dalek = { version = "4.1.3", default-features = false, features = ["alloc"] }
+sha3 = { version = "0.10", default-features = false }
+bs58 = { version = "0.5", default-features = false, features = ["alloc"] }
+hex = { version = "0.4", default-features = false, features = ["alloc"] }
+
+[dev-dependencies]
+near-sdk = { version = "5.29.1", features = ["unit-testing"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+
+[profile.release]
+codegen-units = 1
+opt-level = "z"
+lto = true
+debug = false
+panic = "abort"
+overflow-checks = true
