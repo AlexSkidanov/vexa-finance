@@ -73,7 +73,7 @@ The RP ID must be the origin's hostname or a parent of it. Passkeys registered u
    Use the **session pooler (port 5432)**, not the direct connection (IPv6-only, which Railway can't reach) and not the transaction pooler (port 6543, breaks migrations). URL-encode special characters in the password (`@` → `%40`, `#` → `%23`, and so on).
 6. Auth settings (no env values, but needed for Phase 1):
    - **Authentication** → **Sign In / Providers** → **Email**: enabled. Turn **Confirm email** on.
-   - **Authentication** → **Emails** → **Templates** → **Magic Link**: replace the body with a code-based template containing `{{ .Token }}` so users get a 6-digit OTP instead of a link.
+   - **Authentication** → **Emails** → **Templates** → **Magic Link**: only used as the fallback sender (section 14). If you rely on it, replace the body with a code-based template containing `{{ .Token }}` so users get a code instead of a link. The code length is set under **Authentication → Providers → Email → Email OTP Length**; the app and API accept 6 to 10 digits.
    - **Authentication** → **Emails**: nothing to change. The API sends sign-in codes itself through Postmark (section 14); Supabase's built-in sender is only the fallback.
    - **Authentication** → **URL Configuration** → **Site URL**: your frontend URL.
 

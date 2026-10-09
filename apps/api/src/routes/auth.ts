@@ -26,8 +26,9 @@ import { parseBody } from '../lib/validate.js';
 /**
  * Sign-in is two steps.
  *
- * 1. Email OTP creates the account and proves the email address. Supabase sends
- *    a 6-digit code; verifying it returns a session.
+ * 1. Email OTP creates the account and proves the email address. Supabase
+ *    issues a one-time numeric code and the API emails it through Postmark
+ *    (see lib/auth-provider.ts); verifying it returns a session.
  * 2. With that session, the user registers a passkey. From then on they sign in
  *    with the passkey alone, and the same passkey's PRF output derives their
  *    wallet and encryption keys on-device (see @vexa/core/crypto).
