@@ -1,6 +1,6 @@
 <div align="center">
 
-  <h1><code>vexa</code></h1>
+<a href="https://vexa.finance"><img src=".github/assets/vexa-banner.png" alt="vexa" width="100%" /></a>
 
   <p>
     <strong>A private neobank on Solana.</strong>
@@ -15,7 +15,7 @@
     <a href="https://solana.com"><img src="https://img.shields.io/badge/solana-mainnet-9945FF?style=flat-square" alt="Solana mainnet" /></a>
     <a href="https://github.com/anza-xyz/pinocchio"><img src="https://img.shields.io/badge/pinocchio-0.11-lightgray?style=flat-square" alt="Pinocchio 0.11" /></a>
     <a href="https://docs.near.org/chain-abstraction/chain-signatures"><img src="https://img.shields.io/badge/NEAR-chain%20signatures-00EC97?style=flat-square" alt="NEAR chain signatures" /></a>
-    <a href="https://vexa.finance"><img src="https://img.shields.io/badge/web-vexa.finance-black?style=flat-square" alt="vexa.finance" /></a>
+    <a href="https://vexa.finance"><img src="https://img.shields.io/badge/web-vexa.finance-3DE6A5?style=flat-square&labelColor=0A0A0B" alt="vexa.finance" /></a>
   </p>
 
   <h3>

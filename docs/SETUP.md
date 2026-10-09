@@ -74,7 +74,7 @@ The RP ID must be the origin's hostname or a parent of it. Passkeys registered u
 6. Auth settings (no env values, but needed for Phase 1):
    - **Authentication** → **Sign In / Providers** → **Email**: enabled. Turn **Confirm email** on.
    - **Authentication** → **Emails** → **Templates** → **Magic Link**: replace the body with a code-based template containing `{{ .Token }}` so users get a 6-digit OTP instead of a link.
-   - **Authentication** → **Emails** → **SMTP Settings**: before real users, plug in your own SMTP (Resend, Postmark, SES). The built-in sender is heavily rate-limited.
+   - **Authentication** → **Emails**: nothing to change. The API sends sign-in codes itself through Postmark (section 14); Supabase's built-in sender is only the fallback.
    - **Authentication** → **URL Configuration** → **Site URL**: your frontend URL.
 
 Passkeys are handled by our API (WebAuthn via `@simplewebauthn/server`) with Supabase issuing the session, so Supabase itself needs no passkey settings.
@@ -286,6 +286,22 @@ This creates `vexa-policy.near` through the `near` registrar, funded by the depl
 
 The deployer pays for relaying: about 0.02 NEAR of storage per agent and 0.001 NEAR plus gas per agent payment. Keep a few tenths of a NEAR on it.
 
+### Post-quantum keys
+
+NEAR mainnet accepts ML-DSA-65 access keys (nearcore 2.13+), and the contract account should use one: see [QUANTUM.md](QUANTUM.md). With [near-cli-rs](https://github.com/near/near-cli-rs) 0.30 or later:
+
+```bash
+near account add-key vexa-policy.near grant-full-access \
+  autogenerate-new-keypair --signature-scheme ml-dsa-65 save-to-legacy-keychain \
+  network-config mainnet sign-with-access-key-file ~/.near-credentials/mainnet/vexa-policy.near.json send
+
+# Once a transaction signed with the new key succeeds, remove the Ed25519 key:
+near account delete-keys vexa-policy.near public-keys <ed25519 key> \
+  network-config mainnet sign-with-access-key-file <ml-dsa key file> send
+```
+
+ML-DSA keys have no seed phrase, so the JSON file is the only copy. Keep it offline next to the upgrade authority.
+
 ## 13. $VEXA
 
 ```bash
@@ -296,6 +312,17 @@ pnpm upgrade:vault --authority ~/.config/vexa/upgrade-authority.json --execute  
 ```
 
 `token:create` makes the mint, mints 1,000,000,000 VEXA to the treasury's $VEXA account, writes immutable Metaplex metadata and revokes the mint authority, in one transaction. The metadata JSON (`name`, `symbol`, `description`, `image`) must be permanent: it can't be changed afterwards.
+
+## 14. Email
+
+Sign-in codes go out in Vexa's own template (`apps/api/src/lib/emails.ts`) through [Postmark](https://postmarkapp.com). Supabase's built-in sender only delivers to project members, a few messages an hour, so production needs this.
+
+1. Create a Postmark account and a server named `vexa`, then add the sender domain `vexa.finance` under **Sender Signatures → Domains**.
+2. Add the DKIM TXT record and the Return-Path CNAME that Postmark shows to the Netlify DNS zone for vexa.finance, and wait for both to verify.
+3. Copy the server's API token (**Servers → vexa → API Tokens**) into `POSTMARK_SERVER_TOKEN`. `EMAIL_FROM` defaults to `Vexa <verify@vexa.finance>`.
+4. New Postmark accounts can only send to addresses on their own domain until Postmark approves the account, so request approval before launch.
+
+The API asks Supabase to generate the one-time code without sending it, then sends it itself, so verification is unchanged. Without `POSTMARK_SERVER_TOKEN` it falls back to Supabase's sender.
 
 ---
 
@@ -317,4 +344,5 @@ pnpm upgrade:vault --authority ~/.config/vexa/upgrade-authority.json --execute  
 [ ] pnpm deploy:policy --execute                  (agents)
 [ ] STEALTH_ROUTE_SEED, ZCASH_SEED, ZCASH_BIRTHDAY (stealth), Railway volume at /data
 [ ] pnpm token:create --execute; vault:set-fees --vexa-mint ($VEXA)
+[ ] Postmark domain verified and account approved, POSTMARK_SERVER_TOKEN set (sign-in email)
 ```
