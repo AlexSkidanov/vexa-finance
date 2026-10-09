@@ -256,6 +256,8 @@ main {
   line-height: 1;
   letter-spacing: -0.02em;
   color: var(--paper);
+  /* A stat value never spills out of its cell; it wraps instead. */
+  overflow-wrap: anywhere;
 }
 .note {
   font: 400 17px/1.4 var(--sans);
@@ -424,6 +426,20 @@ main {
   gap: 1px;
   background: var(--hair);
   border: 1px solid var(--hair);
+}
+/* Fixed column counts, for grids whose cell count must fill every row. */
+.hgrid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+@media (max-width: 900px) {
+  .hgrid-3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 560px) {
+  .hgrid-3 {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 .hcell {
   background: var(--vault);
