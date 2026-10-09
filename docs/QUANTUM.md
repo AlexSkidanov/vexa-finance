@@ -13,7 +13,7 @@ The risk is **harvest now, decrypt later**: anyone can archive Vexa's encrypted 
 Vexa enforces agent spending limits in a NEAR contract, `vexa-policy.near`, so NEAR's post-quantum work applies to us directly. Sources: Near One's [Preparing NEAR for the Quantum Computing Era](https://www.near.org/blog/making-near-protocol-post-quantum-safe) (May 2026), [Quantum-Safe NEAR: The Roadmap to Post-Quantum Security](https://www.near.org/blog/near-quantum-safe-roadmap) (August 2026) and the nearcore release notes.
 
 - **Accounts are separate from keys.** A NEAR account is a name controlled by access keys that can be added and removed. On Bitcoin and Ethereum the address is derived from the key, so a broken key means a lost address. On NEAR an account keeps its name and moves to a new key.
-- **ML-DSA-65 is live on mainnet.** [nearcore 2.13.0](https://github.com/near/nearcore/releases/tag/2.13.0) stabilized FIPS 204 ML-DSA-65 as a third transaction and access-key scheme next to Ed25519 and secp256k1. Public keys are stored on-trie as a 32-byte SHA3-256 hash of the 1,952-byte key, and verification costs an extra 100 Ggas. Keys print with the `ml-dsa-65:` prefix.
+- **ML-DSA-65 is live on mainnet.** [nearcore 2.13.0](https://github.com/near/nearcore/releases/tag/2.13.0) stabilized FIPS 204 ML-DSA-65 as a third transaction and access-key scheme next to Ed25519 and secp256k1. Public keys are stored on-trie as a 32-byte SHA3-256 hash of the 1,952-byte key, and verification costs an extra 100 Ggas. Full keys print with the `ml-dsa-65:` prefix, and `view_access_key_list` returns the stored hash as `ml-dsa-65-hash:`.
 - **Wallets.** Meteor Wallet signs with ML-DSA today. Near One is working with Ledger and other wallets.
 - **Next release.** nearcore 2.14 (release candidates as of October 2026) adds an `ml_dsa_verify` host function, so contracts can verify ML-DSA-65 signatures on-chain, and stabilizes universal accounts (`0u`) with a post-quantum-safe derivation.
 
@@ -33,7 +33,7 @@ An account with only ML-DSA keys can't have its transactions forged by a quantum
 
 | Part of Vexa                               | Today                                      | Path to post-quantum                                                  |
 | ------------------------------------------ | ------------------------------------------ | --------------------------------------------------------------------- |
-| Full-access key on `vexa-policy.near`      | Ed25519                                    | Rotate to ML-DSA-65, available now _(planned)_                        |
+| Full-access key on `vexa-policy.near`      | ML-DSA-65 only, since 9 October 2026       | Done                                                                  |
 | Agent limit checks                         | NEAR contract                              | Post-quantum when NEAR consensus is, targeted for end of 2027         |
 | Agent wallets on Solana                    | Ed25519 via NEAR Chain Signatures          | Waits on post-quantum threshold signing                               |
 | Encrypted balances and amounts             | Twisted ElGamal on Curve25519 (Token-2022) | Waits on a post-quantum confidential token standard on Solana         |
@@ -46,7 +46,7 @@ An account with only ML-DSA keys can't have its transactions forged by a quantum
 
 ### Live proof
 
-The site reads the access keys of `vexa-policy.near` from NEAR mainnet in the visitor's browser (`view_access_key_list` on a public RPC), not from our API, and shows each key's scheme. It reports the account as post-quantum only when every full-access key is `ml-dsa-65`. Anyone can check the same thing:
+The site reads the access keys of `vexa-policy.near` from NEAR mainnet in the visitor's browser (`view_access_key_list` on a public RPC), not from our API, and shows each key's scheme. It reports the account as post-quantum only when every full-access key is ML-DSA-65 (`ml-dsa-65-hash:` in the RPC response). Anyone can check the same thing:
 
 ```bash
 near account list-keys vexa-policy.near network-config mainnet now
@@ -54,7 +54,7 @@ near account list-keys vexa-policy.near network-config mainnet now
 
 ## Plan
 
-1. **Rotate the policy contract's keys** _(planned)_. Add an ML-DSA-65 full-access key to `vexa-policy.near`, then delete the Ed25519 one. The site's live check flips on its own. The relayer signs from the deployer account, not from `vexa-policy.near`, so it isn't affected. Contract upgrades through `pnpm deploy:policy` will need an ML-DSA-capable signer afterwards.
+1. **Rotate the policy contract's keys** _(done, 9 October 2026)_. `vexa-policy.near` got an ML-DSA-65 full-access key, signed a test transaction with it, and then deleted its Ed25519 key with an ML-DSA-signed transaction ([5pRfnDPV…](https://nearblocks.io/txns/5pRfnDPVC4bvj1eEdsCyfo9PmbrxgQUmxhPGuUzWKxk9)). It now has no elliptic-curve keys. The relayer signs from the deployer account, not from `vexa-policy.near`, so it isn't affected. Contract upgrades through `pnpm deploy:policy` will need an ML-DSA-capable signer afterwards.
 2. **Dual-sign audit exports and webhooks** _(planned)_. Add an ML-DSA-65 signature next to `X-Vexa-Signature`, so an auditor can still trust an archived export after Ed25519 falls.
 3. **Verify agent approvals post-quantum** _(planned, needs nearcore 2.14)_. Once `ml_dsa_verify` reaches mainnet, owners can sign policy changes with ML-DSA keys and the contract checks them directly.
 4. **Track upstream** for the rest: NEAR consensus and Chain Signatures, a post-quantum confidential token on Solana, and Zcash. The vault is upgradeable, so balances can move to a new confidential token standard with one withdraw and re-deposit when one exists.
@@ -62,5 +62,5 @@ near account list-keys vexa-policy.near network-config mainnet now
 ## What we will and won't claim
 
 - We **will** say Vexa enforces agent limits on NEAR, one of the first blockchains with post-quantum signatures on mainnet.
-- We **will** say the policy contract uses post-quantum keys, once the live check shows it.
+- We **will** say the policy contract is controlled only by post-quantum keys. The live check shows it.
 - We **won't** call Vexa "quantum-proof" or "quantum-secure" as a whole while any row above still depends on elliptic curves.
