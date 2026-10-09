@@ -47,7 +47,7 @@ const VEXA: [string, string, string][] = [
   [
     'Keys that can change the agent policy contract',
     'Shown live above',
-    'Rotate to ML-DSA-65. Available on NEAR now.',
+    'Done: ML-DSA-65 keys only since 9 October 2026.',
   ],
   [
     'Agent limit checks',
