@@ -31,18 +31,18 @@ An account with only ML-DSA keys can't have its transactions forged by a quantum
 
 ## Where Vexa stands
 
-| Part of Vexa                               | Today                                      | Path to post-quantum                                                  |
-| ------------------------------------------ | ------------------------------------------ | --------------------------------------------------------------------- |
-| Full-access key on `vexa-policy.near`      | Ed25519                                    | Rotate to ML-DSA-65, available now _(planned)_                        |
-| Agent limit checks                         | NEAR contract                              | Post-quantum when NEAR consensus is, targeted for end of 2027         |
-| Agent wallets on Solana                    | Ed25519 via NEAR Chain Signatures          | Waits on post-quantum threshold signing                               |
-| Encrypted balances and amounts             | Twisted ElGamal on Curve25519 (Token-2022) | Waits on a post-quantum confidential token standard on Solana         |
-| Solana account and transaction signatures  | Ed25519                                    | Waits on Solana                                                       |
-| Stealth route                              | Zcash Orchard via NEAR Intents             | Waits on Zcash and NEAR Intents                                       |
-| Signed audit exports and webhooks          | Ed25519                                    | Add an ML-DSA-65 signature next to the Ed25519 one _(planned)_        |
-| Passkey sign-in                            | WebAuthn (P-256)                           | Rotatable, so not a harvest-now risk; follows platform support        |
-| Stored API keys and view keys              | AES-256-GCM                                | Already quantum-resistant: Grover's algorithm leaves 128-bit security |
-| Hashes (commitments, idempotency, exports) | SHA-256 / SHA3-256                         | Already quantum-resistant                                             |
+| Part of Vexa                               | Today                                                                   | Path to post-quantum                                                  |
+| ------------------------------------------ | ----------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| Full-access keys on `vexa-policy.near`     | ML-DSA-65 added October 2026; the original Ed25519 key is still present | Remove the Ed25519 key                                                |
+| Agent limit checks                         | NEAR contract                                                           | Post-quantum when NEAR consensus is, targeted for end of 2027         |
+| Agent wallets on Solana                    | Ed25519 via NEAR Chain Signatures                                       | Waits on post-quantum threshold signing                               |
+| Encrypted balances and amounts             | Twisted ElGamal on Curve25519 (Token-2022)                              | Waits on a post-quantum confidential token standard on Solana         |
+| Solana account and transaction signatures  | Ed25519                                                                 | Waits on Solana                                                       |
+| Stealth route                              | Zcash Orchard via NEAR Intents                                          | Waits on Zcash and NEAR Intents                                       |
+| Signed audit exports and webhooks          | Ed25519                                                                 | Add an ML-DSA-65 signature next to the Ed25519 one _(planned)_        |
+| Passkey sign-in                            | WebAuthn (P-256)                                                        | Rotatable, so not a harvest-now risk; follows platform support        |
+| Stored API keys and view keys              | AES-256-GCM                                                             | Already quantum-resistant: Grover's algorithm leaves 128-bit security |
+| Hashes (commitments, idempotency, exports) | SHA-256 / SHA3-256                                                      | Already quantum-resistant                                             |
 
 ### Live proof
 
@@ -54,7 +54,7 @@ near account list-keys vexa-policy.near network-config mainnet now
 
 ## Plan
 
-1. **Rotate the policy contract's keys** _(planned)_. Add an ML-DSA-65 full-access key to `vexa-policy.near`, then delete the Ed25519 one. The site's live check flips on its own. The relayer signs from the deployer account, not from `vexa-policy.near`, so it isn't affected. Contract upgrades through `pnpm deploy:policy` will need an ML-DSA-capable signer afterwards.
+1. **Rotate the policy contract's keys** _(in progress)_. An ML-DSA-65 full-access key was added to `vexa-policy.near` on 9 October 2026 and has signed transactions on mainnet. Deleting the original Ed25519 key finishes the rotation. The site's live check flips on its own. The relayer signs from the deployer account, not from `vexa-policy.near`, so it isn't affected. Contract upgrades through `pnpm deploy:policy` will need an ML-DSA-capable signer afterwards.
 2. **Dual-sign audit exports and webhooks** _(planned)_. Add an ML-DSA-65 signature next to `X-Vexa-Signature`, so an auditor can still trust an archived export after Ed25519 falls.
 3. **Verify agent approvals post-quantum** _(planned, needs nearcore 2.14)_. Once `ml_dsa_verify` reaches mainnet, owners can sign policy changes with ML-DSA keys and the contract checks them directly.
 4. **Track upstream** for the rest: NEAR consensus and Chain Signatures, a post-quantum confidential token on Solana, and Zcash. The vault is upgradeable, so balances can move to a new confidential token standard with one withdraw and re-deposit when one exists.
