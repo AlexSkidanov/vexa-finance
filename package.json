@@ -7,14 +7,34 @@
     "node": ">=20"
   },
   "scripts": {
-    "check-env": "tsx scripts/check-env.ts"
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "eslint . && prettier --check .",
+    "format": "prettier --write .",
+    "test": "turbo run test",
+    "dev": "turbo run dev --filter=@vexa/api",
+    "check-env": "tsx scripts/check-env.ts",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "deploy:vault": "tsx scripts/deploy-vault.ts",
+    "build:vault": "cargo build-sbf --manifest-path programs/vault/Cargo.toml --arch v3 --sbf-out-dir target/deploy",
+    "test:vault": "pnpm build:vault && cargo test -p vexa-vault"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@solana-program/system": "^0.15.0",
+    "@solana-program/token-2022": "^0.19.0",
+    "@solana/kit": "^8.3.0",
     "@types/node": "^22.10.0",
     "dotenv": "^16.4.7",
+    "eslint": "^10.11.0",
     "postgres": "^3.4.5",
+    "prettier": "^3.9.9",
+    "tsup": "^8.5.1",
     "tsx": "^4.19.2",
+    "turbo": "^2.11.5",
     "typescript": "^5.7.2",
+    "typescript-eslint": "^8.70.1",
+    "vitest": "^5.0.2",
     "zod": "^3.24.1"
   }
 }

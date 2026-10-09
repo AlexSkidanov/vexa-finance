@@ -1,0 +1,7 @@
+# Default owners for everything in the repository.
+* @AlexSkidanov
+
+# On-chain code moves real money. Changes here need an explicit review.
+/programs/          @AlexSkidanov
+/contracts/         @AlexSkidanov
+/supabase/migrations/ @AlexSkidanov

@@ -20,7 +20,10 @@ import { z } from 'zod';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const envFlag = process.argv.indexOf('--env');
-const ENV_PATH = envFlag > -1 && process.argv[envFlag + 1] ? resolve(process.argv[envFlag + 1]!) : resolve(ROOT, '.env');
+const ENV_PATH =
+  envFlag > -1 && process.argv[envFlag + 1]
+    ? resolve(process.argv[envFlag + 1]!)
+    : resolve(ROOT, '.env');
 const TIMEOUT_MS = 12_000;
 
 // ---------------------------------------------------------------------------
@@ -131,7 +134,8 @@ function nearKeyPublic(raw: string): string | null {
   const bytes = b58decode(m[1]!);
   if (!bytes || (bytes.length !== 64 && bytes.length !== 32)) return null;
   const derived = ed25519PubFromSeed(bytes.subarray(0, 32));
-  if (bytes.length === 64 && !Buffer.from(derived).equals(Buffer.from(bytes.subarray(32)))) return null;
+  if (bytes.length === 64 && !Buffer.from(derived).equals(Buffer.from(bytes.subarray(32))))
+    return null;
   return `ed25519:${b58encode(derived)}`;
 }
 
@@ -163,37 +167,96 @@ interface Spec {
   note?: string;
 }
 
-const hex32 = z.string().regex(/^[0-9a-fA-F]{64}$/, 'must be 32 bytes hex (64 chars); use `openssl rand -hex 32`');
-const httpUrl = z.string().url().refine((u) => /^https?:\/\//.test(u), 'must be http(s)');
-const httpsUrl = z.string().url().refine((u) => u.startsWith('https://'), 'must be https');
+const hex32 = z
+  .string()
+  .regex(/^[0-9a-fA-F]{64}$/, 'must be 32 bytes hex (64 chars); use `openssl rand -hex 32`');
+const httpUrl = z
+  .string()
+  .url()
+  .refine((u) => /^https?:\/\//.test(u), 'must be http(s)');
+const httpsUrl = z
+  .string()
+  .url()
+  .refine((u) => u.startsWith('https://'), 'must be https');
 const pubkey = z.string().refine(isPubkey, 'not a base58 32-byte Solana public key');
 const solKeypair = z
   .string()
-  .refine((s) => solanaKeypairPubkey(s) !== null, 'not a valid 64-byte ed25519 keypair (base58 or JSON array); pubkey half must match secret half');
-const nearAccount = z.string().regex(/^(?=.{2,64}$)([a-z\d]+[-_])*[a-z\d]+(\.([a-z\d]+[-_])*[a-z\d]+)*$/, 'not a valid NEAR account id');
+  .refine(
+    (s) => solanaKeypairPubkey(s) !== null,
+    'not a valid 64-byte ed25519 keypair (base58 or JSON array); pubkey half must match secret half',
+  );
+const nearAccount = z
+  .string()
+  .regex(
+    /^(?=.{2,64}$)([a-z\d]+[-_])*[a-z\d]+(\.([a-z\d]+[-_])*[a-z\d]+)*$/,
+    'not a valid NEAR account id',
+  );
 const any = z.string();
 
 const SPECS: Spec[] = [
   // App
-  { group: 'App', key: 'NODE_ENV', level: 'required', schema: z.enum(['development', 'test', 'production']) },
-  { group: 'App', key: 'PORT', level: 'required', schema: z.coerce.number().int().min(1).max(65535) },
-  { group: 'App', key: 'LOG_LEVEL', level: 'required', schema: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent']) },
+  {
+    group: 'App',
+    key: 'NODE_ENV',
+    level: 'required',
+    schema: z.enum(['development', 'test', 'production']),
+  },
+  {
+    group: 'App',
+    key: 'PORT',
+    level: 'required',
+    schema: z.coerce.number().int().min(1).max(65535),
+  },
+  {
+    group: 'App',
+    key: 'LOG_LEVEL',
+    level: 'required',
+    schema: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent']),
+  },
   { group: 'App', key: 'API_BASE_URL', level: 'required', schema: httpUrl },
   { group: 'App', key: 'API_KEY_ENCRYPTION_KEY', level: 'required', schema: hex32, secret: true },
-  { group: 'App', key: 'WEBHOOK_SIGNING_SECRET', level: 'required', schema: z.string().min(32, 'must be at least 32 chars'), secret: true },
+  {
+    group: 'App',
+    key: 'WEBHOOK_SIGNING_SECRET',
+    level: 'required',
+    schema: z.string().min(32, 'must be at least 32 chars'),
+    secret: true,
+  },
   { group: 'App', key: 'VIEW_KEY_ENCRYPTION_KEY', level: 'required', schema: hex32, secret: true },
-  { group: 'App', key: 'WEBAUTHN_RP_ID', level: 'required', schema: z.string().regex(/^[a-z0-9.-]+$/, 'must be a bare hostname, no scheme/port') },
+  {
+    group: 'App',
+    key: 'WEBAUTHN_RP_ID',
+    level: 'required',
+    schema: z.string().regex(/^[a-z0-9.-]+$/, 'must be a bare hostname, no scheme/port'),
+  },
   { group: 'App', key: 'WEBAUTHN_RP_NAME', level: 'required', schema: z.string().min(1) },
   {
     group: 'App',
     key: 'WEBAUTHN_ORIGINS',
     level: 'required',
-    schema: z.string().refine((s) => s.split(',').every((o) => httpUrl.safeParse(o.trim()).success), 'comma-separated list of http(s) origins'),
+    schema: z
+      .string()
+      .refine(
+        (s) => s.split(',').every((o) => httpUrl.safeParse(o.trim()).success),
+        'comma-separated list of http(s) origins',
+      ),
   },
   // Supabase
   { group: 'Supabase', key: 'SUPABASE_URL', level: 'required', schema: httpsUrl },
-  { group: 'Supabase', key: 'SUPABASE_ANON_KEY', level: 'required', schema: z.string().min(20), secret: true },
-  { group: 'Supabase', key: 'SUPABASE_SERVICE_ROLE_KEY', level: 'required', schema: z.string().min(20), secret: true },
+  {
+    group: 'Supabase',
+    key: 'SUPABASE_ANON_KEY',
+    level: 'required',
+    schema: z.string().min(20),
+    secret: true,
+  },
+  {
+    group: 'Supabase',
+    key: 'SUPABASE_SERVICE_ROLE_KEY',
+    level: 'required',
+    schema: z.string().min(20),
+    secret: true,
+  },
   {
     group: 'Supabase',
     key: 'SUPABASE_DB_URL',
@@ -202,23 +265,99 @@ const SPECS: Spec[] = [
     secret: true,
   },
   // Required-ness depends on the key style; decided in the Supabase probe.
-  { group: 'Supabase', key: 'SUPABASE_JWT_SECRET', level: 'optional', schema: z.string().min(32), secret: true },
+  {
+    group: 'Supabase',
+    key: 'SUPABASE_JWT_SECRET',
+    level: 'optional',
+    schema: z.string().min(32),
+    secret: true,
+  },
   // Alchemy
-  { group: 'Alchemy', key: 'ALCHEMY_SOLANA_RPC_URL', level: 'required', schema: httpsUrl, secret: true },
-  { group: 'Alchemy', key: 'ALCHEMY_WEBHOOK_SIGNING_KEY', level: 'required', schema: z.string().min(16), secret: true },
-  { group: 'Alchemy', key: 'ALCHEMY_WEBHOOK_ID', level: 'later', schema: z.string().regex(/^wh_/, 'expected wh_...'), note: 'Phase 2' },
-  { group: 'Alchemy', key: 'ALCHEMY_NOTIFY_AUTH_TOKEN', level: 'later', schema: z.string().min(16), secret: true, note: 'Phase 2' },
+  {
+    group: 'Alchemy',
+    key: 'ALCHEMY_SOLANA_RPC_URL',
+    level: 'required',
+    schema: httpsUrl,
+    secret: true,
+  },
+  {
+    group: 'Alchemy',
+    key: 'ALCHEMY_WEBHOOK_SIGNING_KEY',
+    level: 'required',
+    schema: z.string().min(16),
+    secret: true,
+  },
+  {
+    group: 'Alchemy',
+    key: 'ALCHEMY_WEBHOOK_ID',
+    level: 'later',
+    schema: z.string().regex(/^wh_/, 'expected wh_...'),
+    note: 'Phase 2',
+  },
+  {
+    group: 'Alchemy',
+    key: 'ALCHEMY_NOTIFY_AUTH_TOKEN',
+    level: 'later',
+    schema: z.string().min(16),
+    secret: true,
+    note: 'Phase 2',
+  },
   // Solana
-  { group: 'Solana', key: 'SOLANA_CLUSTER', level: 'required', schema: z.enum(['devnet', 'mainnet-beta']) },
-  { group: 'Solana', key: 'SOLANA_FEE_PAYER_KEYPAIR', level: 'required', schema: solKeypair, secret: true },
-  { group: 'Solana', key: 'SOLANA_ADMIN_KEYPAIR', level: 'required', schema: solKeypair, secret: true },
+  {
+    group: 'Solana',
+    key: 'SOLANA_CLUSTER',
+    level: 'required',
+    schema: z.enum(['devnet', 'mainnet-beta']),
+  },
+  {
+    group: 'Solana',
+    key: 'SOLANA_FEE_PAYER_KEYPAIR',
+    level: 'required',
+    schema: solKeypair,
+    secret: true,
+  },
+  {
+    group: 'Solana',
+    key: 'SOLANA_ADMIN_KEYPAIR',
+    level: 'required',
+    schema: solKeypair,
+    secret: true,
+  },
   { group: 'Solana', key: 'USDC_MINT', level: 'required', schema: pubkey },
-  { group: 'Solana', key: 'VAULT_PROGRAM_ID', level: 'later', schema: pubkey, note: 'Phase 1 (anchor deploy)' },
-  { group: 'Solana', key: 'CUSDC_MINT', level: 'later', schema: pubkey, note: 'Phase 1 (vault init)' },
+  {
+    group: 'Solana',
+    key: 'VAULT_PROGRAM_ID',
+    level: 'later',
+    schema: pubkey,
+    note: 'Phase 1 (pnpm deploy:vault)',
+  },
+  {
+    group: 'Solana',
+    key: 'CUSDC_MINT',
+    level: 'later',
+    schema: pubkey,
+    note: 'Phase 1 (vault init)',
+  },
   { group: 'Solana', key: 'VEXA_TOKEN_MINT', level: 'later', schema: pubkey, note: 'Phase 3' },
-  { group: 'Solana', key: 'TREASURY_OWNER_PUBKEY', level: 'later', schema: pubkey, note: 'Phase 2' },
-  { group: 'Solana', key: 'FEE_PAYER_MIN_SOL', level: 'optional', schema: z.coerce.number().positive() },
-  { group: 'Solana', key: 'ADMIN_MIN_SOL', level: 'optional', schema: z.coerce.number().nonnegative() },
+  {
+    group: 'Solana',
+    key: 'TREASURY_OWNER_PUBKEY',
+    level: 'later',
+    schema: pubkey,
+    note: 'Phase 2',
+  },
+  {
+    group: 'Solana',
+    key: 'FEE_PAYER_MIN_SOL',
+    level: 'optional',
+    schema: z.coerce.number().positive(),
+  },
+  {
+    group: 'Solana',
+    key: 'ADMIN_MIN_SOL',
+    level: 'optional',
+    schema: z.coerce.number().nonnegative(),
+  },
   // NEAR
   { group: 'NEAR', key: 'NEAR_NETWORK', level: 'required', schema: z.enum(['testnet', 'mainnet']) },
   { group: 'NEAR', key: 'NEAR_RPC_URL', level: 'required', schema: httpsUrl, secret: true },
@@ -227,23 +366,74 @@ const SPECS: Spec[] = [
     group: 'NEAR',
     key: 'NEAR_DEPLOYER_PRIVATE_KEY',
     level: 'required',
-    schema: z.string().refine((s) => nearKeyPublic(s) !== null, 'must be ed25519:<base58> (64-byte secret key)'),
+    schema: z
+      .string()
+      .refine((s) => nearKeyPublic(s) !== null, 'must be ed25519:<base58> (64-byte secret key)'),
     secret: true,
   },
-  { group: 'NEAR', key: 'NEAR_POLICY_CONTRACT_ID', level: 'later', schema: nearAccount, note: 'Phase 3' },
+  {
+    group: 'NEAR',
+    key: 'NEAR_POLICY_CONTRACT_ID',
+    level: 'later',
+    schema: nearAccount,
+    note: 'Phase 3',
+  },
   { group: 'NEAR', key: 'NEAR_MPC_CONTRACT_ID', level: 'required', schema: nearAccount },
-  { group: 'NEAR', key: 'NEAR_DEPLOYER_MIN_NEAR', level: 'optional', schema: z.coerce.number().nonnegative() },
+  {
+    group: 'NEAR',
+    key: 'NEAR_DEPLOYER_MIN_NEAR',
+    level: 'optional',
+    schema: z.coerce.number().nonnegative(),
+  },
   // Intents
   { group: 'NEAR Intents', key: 'INTENTS_1CLICK_BASE_URL', level: 'required', schema: httpsUrl },
-  { group: 'NEAR Intents', key: 'INTENTS_1CLICK_JWT', level: 'optional', schema: z.string().min(20), secret: true },
+  {
+    group: 'NEAR Intents',
+    key: 'INTENTS_1CLICK_JWT',
+    level: 'optional',
+    schema: z.string().min(20),
+    secret: true,
+  },
   // Zcash
-  { group: 'Zcash', key: 'ZCASH_NETWORK', level: 'later', schema: z.enum(['mainnet', 'testnet']), note: 'Phase 3' },
-  { group: 'Zcash', key: 'ZCASH_WALLET_RPC_URL', level: 'later', schema: httpUrl, secret: true, note: 'Phase 3' },
+  {
+    group: 'Zcash',
+    key: 'ZCASH_NETWORK',
+    level: 'later',
+    schema: z.enum(['mainnet', 'testnet']),
+    note: 'Phase 3',
+  },
+  {
+    group: 'Zcash',
+    key: 'ZCASH_WALLET_RPC_URL',
+    level: 'later',
+    schema: httpUrl,
+    secret: true,
+    note: 'Phase 3',
+  },
   { group: 'Zcash', key: 'ZCASH_WALLET_RPC_USER', level: 'later', schema: any, note: 'Phase 3' },
-  { group: 'Zcash', key: 'ZCASH_WALLET_RPC_PASSWORD', level: 'later', schema: any, secret: true, note: 'Phase 3' },
+  {
+    group: 'Zcash',
+    key: 'ZCASH_WALLET_RPC_PASSWORD',
+    level: 'later',
+    schema: any,
+    secret: true,
+    note: 'Phase 3',
+  },
   // CI / deploy / stubs
-  { group: 'GitHub', key: 'GITHUB_TOKEN', level: 'optional', schema: z.string().min(20), secret: true },
-  { group: 'Railway', key: 'RAILWAY_TOKEN', level: 'optional', schema: z.string().min(10), secret: true },
+  {
+    group: 'GitHub',
+    key: 'GITHUB_TOKEN',
+    level: 'optional',
+    schema: z.string().min(20),
+    secret: true,
+  },
+  {
+    group: 'Railway',
+    key: 'RAILWAY_TOKEN',
+    level: 'optional',
+    schema: z.string().min(10),
+    secret: true,
+  },
   { group: 'Stubs', key: 'CARD_ISSUER_API_KEY', level: 'optional', schema: any, secret: true },
   { group: 'Stubs', key: 'KYC_PROVIDER_API_KEY', level: 'optional', schema: any, secret: true },
 ];
@@ -284,7 +474,10 @@ function errMsg(e: unknown): string {
   return String(e);
 }
 
-async function fetchJson(url: string, init: RequestInit = {}): Promise<{ status: number; body: any }> {
+async function fetchJson(
+  url: string,
+  init: RequestInit = {},
+): Promise<{ status: number; body: any }> {
   const res = await fetch(url, { ...init, signal: AbortSignal.timeout(TIMEOUT_MS) });
   const text = await res.text();
   let body: any = text;
@@ -305,7 +498,12 @@ async function rpc<T = any>(url: string, method: string, params: unknown): Promi
   if (status !== 200) throw new Error(`HTTP ${status}`);
   if (body?.error) {
     const e = body.error;
-    throw new Error(e.cause?.name ?? (typeof e.data === 'string' ? e.data : null) ?? e.message ?? JSON.stringify(e));
+    throw new Error(
+      e.cause?.name ??
+        (typeof e.data === 'string' ? e.data : null) ??
+        e.message ??
+        JSON.stringify(e),
+    );
   }
   if (body?.result?.error) throw new Error(String(body.result.error));
   return body.result as T;
@@ -313,7 +511,9 @@ async function rpc<T = any>(url: string, method: string, params: unknown): Promi
 
 function blocked(group: string, check: string, keys: string[]): Row | null {
   const bad = keys.filter((k) => !valid.has(k));
-  return bad.length ? { group, check, status: 'SKIP', detail: `blocked: fix ${bad.join(', ')} first` } : null;
+  return bad.length
+    ? { group, check, status: 'SKIP', detail: `blocked: fix ${bad.join(', ')} first` }
+    : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -323,7 +523,11 @@ function blocked(group: string, check: string, keys: string[]): Row | null {
 async function probeSupabase(): Promise<Row[]> {
   const G = 'Supabase';
   const rows: Row[] = [];
-  const b = blocked(G, 'API reachable', ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY']);
+  const b = blocked(G, 'API reachable', [
+    'SUPABASE_URL',
+    'SUPABASE_ANON_KEY',
+    'SUPABASE_SERVICE_ROLE_KEY',
+  ]);
   if (b) return [b];
 
   const url = v('SUPABASE_URL').replace(/\/$/, '');
@@ -335,29 +539,54 @@ async function probeSupabase(): Promise<Row[]> {
   const anonJwt = decodeJwt(anon);
   const serviceJwt = decodeJwt(service);
   if (anon === service) {
-    rows.push({ group: G, check: 'Key roles', status: 'FAIL', detail: 'anon and service role keys are identical' });
+    rows.push({
+      group: G,
+      check: 'Key roles',
+      status: 'FAIL',
+      detail: 'anon and service role keys are identical',
+    });
   } else if (anonJwt && serviceJwt) {
     const problems: string[] = [];
-    if (anonJwt.payload.role !== 'anon') problems.push(`SUPABASE_ANON_KEY has role "${anonJwt.payload.role}"`);
-    if (serviceJwt.payload.role !== 'service_role') problems.push(`SUPABASE_SERVICE_ROLE_KEY has role "${serviceJwt.payload.role}"`);
-    if (anonJwt.payload.ref && anonJwt.payload.ref !== projectRef) problems.push(`anon key is for project ${anonJwt.payload.ref}, URL is ${projectRef}`);
-    if (serviceJwt.payload.ref && serviceJwt.payload.ref !== projectRef) problems.push(`service key is for project ${serviceJwt.payload.ref}`);
-    rows.push({ group: G, check: 'Key roles', status: problems.length ? 'FAIL' : 'PASS', detail: problems.join('; ') || `legacy JWT keys, project ${projectRef}` });
+    if (anonJwt.payload.role !== 'anon')
+      problems.push(`SUPABASE_ANON_KEY has role "${anonJwt.payload.role}"`);
+    if (serviceJwt.payload.role !== 'service_role')
+      problems.push(`SUPABASE_SERVICE_ROLE_KEY has role "${serviceJwt.payload.role}"`);
+    if (anonJwt.payload.ref && anonJwt.payload.ref !== projectRef)
+      problems.push(`anon key is for project ${anonJwt.payload.ref}, URL is ${projectRef}`);
+    if (serviceJwt.payload.ref && serviceJwt.payload.ref !== projectRef)
+      problems.push(`service key is for project ${serviceJwt.payload.ref}`);
+    rows.push({
+      group: G,
+      check: 'Key roles',
+      status: problems.length ? 'FAIL' : 'PASS',
+      detail: problems.join('; ') || `legacy JWT keys, project ${projectRef}`,
+    });
   } else if (anon.startsWith('sb_publishable_') && service.startsWith('sb_secret_')) {
-    rows.push({ group: G, check: 'Key roles', status: 'PASS', detail: 'new-style publishable/secret keys' });
+    rows.push({
+      group: G,
+      check: 'Key roles',
+      status: 'PASS',
+      detail: 'new-style publishable/secret keys',
+    });
   } else {
     rows.push({
       group: G,
       check: 'Key roles',
       status: 'WARN',
-      detail: 'mixed or unrecognised key formats; expected two legacy JWTs or sb_publishable_/sb_secret_',
+      detail:
+        'mixed or unrecognised key formats; expected two legacy JWTs or sb_publishable_/sb_secret_',
     });
   }
 
   // Auth health
   try {
     const { status } = await fetchJson(`${url}/auth/v1/health`, { headers: { apikey: anon } });
-    rows.push({ group: G, check: 'Auth API (anon key)', status: status === 200 ? 'PASS' : 'FAIL', detail: `GET /auth/v1/health -> ${status}` });
+    rows.push({
+      group: G,
+      check: 'Auth API (anon key)',
+      status: status === 200 ? 'PASS' : 'FAIL',
+      detail: `GET /auth/v1/health -> ${status}`,
+    });
   } catch (e) {
     rows.push({ group: G, check: 'Auth API (anon key)', status: 'FAIL', detail: errMsg(e) });
   }
@@ -367,7 +596,12 @@ async function probeSupabase(): Promise<Row[]> {
     const headers: Record<string, string> = { apikey: service };
     if (serviceJwt) headers.authorization = `Bearer ${service}`;
     const { status } = await fetchJson(`${url}/rest/v1/`, { headers });
-    rows.push({ group: G, check: 'REST API (service key)', status: status === 200 ? 'PASS' : 'FAIL', detail: `GET /rest/v1/ -> ${status}` });
+    rows.push({
+      group: G,
+      check: 'REST API (service key)',
+      status: status === 200 ? 'PASS' : 'FAIL',
+      detail: `GET /rest/v1/ -> ${status}`,
+    });
   } catch (e) {
     rows.push({ group: G, check: 'REST API (service key)', status: 'FAIL', detail: errMsg(e) });
   }
@@ -376,26 +610,53 @@ async function probeSupabase(): Promise<Row[]> {
   const secret = v('SUPABASE_JWT_SECRET');
   if (anonJwt && anonJwt.header.alg === 'HS256') {
     if (!secret) {
-      rows.push({ group: G, check: 'JWT secret', status: 'FAIL', detail: 'project uses legacy HS256 keys; SUPABASE_JWT_SECRET is required' });
+      rows.push({
+        group: G,
+        check: 'JWT secret',
+        status: 'FAIL',
+        detail: 'project uses legacy HS256 keys; SUPABASE_JWT_SECRET is required',
+      });
     } else {
-      const sig = createHmac('sha256', secret).update(`${anonJwt.parts[0]}.${anonJwt.parts[1]}`).digest('base64url');
+      const sig = createHmac('sha256', secret)
+        .update(`${anonJwt.parts[0]}.${anonJwt.parts[1]}`)
+        .digest('base64url');
       rows.push({
         group: G,
         check: 'JWT secret',
         status: sig === anonJwt.parts[2] ? 'PASS' : 'FAIL',
-        detail: sig === anonJwt.parts[2] ? 'verifies the anon key signature' : 'does not verify the anon key: wrong secret or wrong project',
+        detail:
+          sig === anonJwt.parts[2]
+            ? 'verifies the anon key signature'
+            : 'does not verify the anon key: wrong secret or wrong project',
       });
     }
   } else {
     try {
-      const { status, body } = await fetchJson(`${url}/auth/v1/.well-known/jwks.json`, { headers: { apikey: anon } });
+      const { status, body } = await fetchJson(`${url}/auth/v1/.well-known/jwks.json`, {
+        headers: { apikey: anon },
+      });
       const n = Array.isArray(body?.keys) ? body.keys.length : 0;
       if (status === 200 && n > 0) {
-        rows.push({ group: G, check: 'JWT signing keys', status: 'PASS', detail: `${n} asymmetric key(s) in JWKS; API will verify via JWKS` });
+        rows.push({
+          group: G,
+          check: 'JWT signing keys',
+          status: 'PASS',
+          detail: `${n} asymmetric key(s) in JWKS; API will verify via JWKS`,
+        });
       } else if (secret) {
-        rows.push({ group: G, check: 'JWT signing keys', status: 'PASS', detail: 'no JWKS keys; will verify with SUPABASE_JWT_SECRET (not verifiable here)' });
+        rows.push({
+          group: G,
+          check: 'JWT signing keys',
+          status: 'PASS',
+          detail: 'no JWKS keys; will verify with SUPABASE_JWT_SECRET (not verifiable here)',
+        });
       } else {
-        rows.push({ group: G, check: 'JWT signing keys', status: 'FAIL', detail: 'no JWKS keys and no SUPABASE_JWT_SECRET; set the legacy secret' });
+        rows.push({
+          group: G,
+          check: 'JWT signing keys',
+          status: 'FAIL',
+          detail: 'no JWKS keys and no SUPABASE_JWT_SECRET; set the legacy secret',
+        });
       }
     } catch (e) {
       rows.push({ group: G, check: 'JWT signing keys', status: 'FAIL', detail: errMsg(e) });
@@ -407,9 +668,16 @@ async function probeSupabase(): Promise<Row[]> {
     rows.push(blocked(G, 'Postgres connection', ['SUPABASE_DB_URL'])!);
   } else {
     const dbUrl = new URL(v('SUPABASE_DB_URL'));
-    const sql = postgres(v('SUPABASE_DB_URL'), { max: 1, connect_timeout: 10, idle_timeout: 1, prepare: false, onnotice: () => {} });
+    const sql = postgres(v('SUPABASE_DB_URL'), {
+      max: 1,
+      connect_timeout: 10,
+      idle_timeout: 1,
+      prepare: false,
+      onnotice: () => {},
+    });
     try {
-      const [r] = await sql`select current_database() as db, current_setting('server_version') as version`;
+      const [r] =
+        await sql`select current_database() as db, current_setting('server_version') as version`;
       const notes: string[] = [`postgres ${r!.version}`];
       let status: Status = 'PASS';
       if (dbUrl.port === '6543') {
@@ -441,7 +709,10 @@ async function probeSolana(): Promise<Row[]> {
   const cluster = v('SOLANA_CLUSTER');
 
   try {
-    const [genesis, version] = await Promise.all([rpc<string>(url, 'getGenesisHash', []), rpc<any>(url, 'getVersion', [])]);
+    const [genesis, version] = await Promise.all([
+      rpc<string>(url, 'getGenesisHash', []),
+      rpc<any>(url, 'getVersion', []),
+    ]);
     const match = genesis === SOLANA_GENESIS[cluster];
     rows.push({
       group: G,
@@ -459,12 +730,21 @@ async function probeSolana(): Promise<Row[]> {
 
   // Keypairs + balances
   const minSol = Number(v('FEE_PAYER_MIN_SOL') || 0.05);
-  const adminMinSol = Number(v('ADMIN_MIN_SOL') || 0.02);
-  const feePayer = valid.has('SOLANA_FEE_PAYER_KEYPAIR') ? solanaKeypairPubkey(v('SOLANA_FEE_PAYER_KEYPAIR')) : null;
-  const admin = valid.has('SOLANA_ADMIN_KEYPAIR') ? solanaKeypairPubkey(v('SOLANA_ADMIN_KEYPAIR')) : null;
+  const adminMinSol = Number(v('ADMIN_MIN_SOL') || 0.005);
+  const feePayer = valid.has('SOLANA_FEE_PAYER_KEYPAIR')
+    ? solanaKeypairPubkey(v('SOLANA_FEE_PAYER_KEYPAIR'))
+    : null;
+  const admin = valid.has('SOLANA_ADMIN_KEYPAIR')
+    ? solanaKeypairPubkey(v('SOLANA_ADMIN_KEYPAIR'))
+    : null;
 
   if (feePayer && admin && feePayer === admin) {
-    rows.push({ group: G, check: 'Keypair separation', status: 'WARN', detail: 'fee payer and admin are the same key; use two keys' });
+    rows.push({
+      group: G,
+      check: 'Keypair separation',
+      status: 'WARN',
+      detail: 'fee payer and admin are the same key; use two keys',
+    });
   }
 
   for (const [label, pk, min, hint] of [
@@ -472,14 +752,25 @@ async function probeSolana(): Promise<Row[]> {
     ['Admin balance', admin, adminMinSol, `needs >= ${adminMinSol} SOL`],
   ] as const) {
     if (!pk) {
-      rows.push({ group: G, check: label, status: 'SKIP', detail: 'blocked: keypair invalid or missing' });
+      rows.push({
+        group: G,
+        check: label,
+        status: 'SKIP',
+        detail: 'blocked: keypair invalid or missing',
+      });
       continue;
     }
     try {
-      const { value } = await rpc<{ value: number }>(url, 'getBalance', [pk, { commitment: 'confirmed' }]);
+      const { value } = await rpc<{ value: number }>(url, 'getBalance', [
+        pk,
+        { commitment: 'confirmed' },
+      ]);
       const sol = value / LAMPORTS_PER_SOL;
       const ok = sol >= min;
-      const fund = cluster === 'devnet' ? `; run: solana airdrop 2 ${pk} -u devnet (or faucet.solana.com)` : '';
+      const fund =
+        cluster === 'devnet'
+          ? `; run: solana airdrop 2 ${pk} -u devnet (or faucet.solana.com)`
+          : '';
       rows.push({
         group: G,
         check: label,
@@ -504,17 +795,33 @@ async function probeSolana(): Promise<Row[]> {
         Buffer.from([1, 1, 0, 2, 4, 0]),
       ]);
       const tx = Buffer.concat([Buffer.from([1]), Buffer.alloc(64), msg]).toString('base64');
-      const { value } = await rpc<{ value: { err: any; logs: string[] | null } }>(url, 'simulateTransaction', [
-        tx,
-        { encoding: 'base64', sigVerify: false, replaceRecentBlockhash: true },
-      ]);
+      const { value } = await rpc<{ value: { err: any; logs: string[] | null } }>(
+        url,
+        'simulateTransaction',
+        [tx, { encoding: 'base64', sigVerify: false, replaceRecentBlockhash: true }],
+      );
       const ran = (value.logs ?? []).some((l) => l.includes('invalid proof data'));
       if (ran) {
-        rows.push({ group: G, check: 'ZK ElGamal proof program', status: 'PASS', detail: `enabled on ${cluster} (confidential transfers available)` });
+        rows.push({
+          group: G,
+          check: 'ZK ElGamal proof program',
+          status: 'PASS',
+          detail: `enabled on ${cluster} (confidential transfers available)`,
+        });
       } else if (JSON.stringify(value.err ?? '').includes('AccountNotFound')) {
-        rows.push({ group: G, check: 'ZK ElGamal proof program', status: 'SKIP', detail: 'fund the fee payer first (simulation needs an existing payer)' });
+        rows.push({
+          group: G,
+          check: 'ZK ElGamal proof program',
+          status: 'SKIP',
+          detail: 'fund the fee payer first (simulation needs an existing payer)',
+        });
       } else {
-        rows.push({ group: G, check: 'ZK ElGamal proof program', status: 'FAIL', detail: `not executing on ${cluster}: ${JSON.stringify(value.err)}` });
+        rows.push({
+          group: G,
+          check: 'ZK ElGamal proof program',
+          status: 'FAIL',
+          detail: `not executing on ${cluster}: ${JSON.stringify(value.err)}`,
+        });
       }
     } catch (e) {
       rows.push({ group: G, check: 'ZK ElGamal proof program', status: 'FAIL', detail: errMsg(e) });
@@ -523,7 +830,10 @@ async function probeSolana(): Promise<Row[]> {
 
   // Mints and program
   async function parsedAccount(addr: string) {
-    const { value } = await rpc<{ value: any }>(url, 'getAccountInfo', [addr, { encoding: 'jsonParsed', commitment: 'confirmed' }]);
+    const { value } = await rpc<{ value: any }>(url, 'getAccountInfo', [
+      addr,
+      { encoding: 'jsonParsed', commitment: 'confirmed' },
+    ]);
     return value;
   }
 
@@ -532,9 +842,19 @@ async function probeSolana(): Promise<Row[]> {
       const acc = await parsedAccount(v('USDC_MINT'));
       const canonical = CANONICAL_USDC[cluster];
       if (!acc) {
-        rows.push({ group: G, check: 'USDC mint', status: 'FAIL', detail: `account not found on ${cluster}` });
+        rows.push({
+          group: G,
+          check: 'USDC mint',
+          status: 'FAIL',
+          detail: `account not found on ${cluster}`,
+        });
       } else if (acc.owner !== TOKEN_PROGRAM || acc.data?.parsed?.type !== 'mint') {
-        rows.push({ group: G, check: 'USDC mint', status: 'FAIL', detail: 'account is not an SPL Token mint' });
+        rows.push({
+          group: G,
+          check: 'USDC mint',
+          status: 'FAIL',
+          detail: 'account is not an SPL Token mint',
+        });
       } else {
         const same = v('USDC_MINT') === canonical;
         rows.push({
@@ -558,7 +878,9 @@ async function probeSolana(): Promise<Row[]> {
         group: G,
         check: 'Vault program',
         status: acc?.executable ? 'PASS' : 'FAIL',
-        detail: acc?.executable ? 'deployed and executable' : 'not deployed / not executable on this cluster',
+        detail: acc?.executable
+          ? 'deployed and executable'
+          : 'not deployed / not executable on this cluster',
       });
     } catch (e) {
       rows.push({ group: G, check: 'Vault program', status: 'FAIL', detail: errMsg(e) });
@@ -568,18 +890,32 @@ async function probeSolana(): Promise<Row[]> {
   if (valid.has('CUSDC_MINT')) {
     try {
       const acc = await parsedAccount(v('CUSDC_MINT'));
-      const ext = (acc?.data?.parsed?.info?.extensions ?? []).find((x: any) => x.extension === 'confidentialTransferMint');
+      const ext = (acc?.data?.parsed?.info?.extensions ?? []).find(
+        (x: any) => x.extension === 'confidentialTransferMint',
+      );
       if (!acc || acc.owner !== TOKEN_2022_PROGRAM) {
-        rows.push({ group: G, check: 'cUSDC mint', status: 'FAIL', detail: 'not a Token-2022 mint on this cluster' });
+        rows.push({
+          group: G,
+          check: 'cUSDC mint',
+          status: 'FAIL',
+          detail: 'not a Token-2022 mint on this cluster',
+        });
       } else if (!ext) {
-        rows.push({ group: G, check: 'cUSDC mint', status: 'FAIL', detail: 'Token-2022 mint without ConfidentialTransfer extension' });
+        rows.push({
+          group: G,
+          check: 'cUSDC mint',
+          status: 'FAIL',
+          detail: 'Token-2022 mint without ConfidentialTransfer extension',
+        });
       } else {
         const auto = ext.state?.autoApproveNewAccounts;
         rows.push({
           group: G,
           check: 'cUSDC mint',
           status: auto ? 'PASS' : 'WARN',
-          detail: auto ? 'Token-2022 + ConfidentialTransfer, auto-approve on' : 'ConfidentialTransfer present but auto-approve is off',
+          detail: auto
+            ? 'Token-2022 + ConfidentialTransfer, auto-approve on'
+            : 'ConfidentialTransfer present but auto-approve is off',
         });
       }
     } catch (e) {
@@ -591,7 +927,12 @@ async function probeSolana(): Promise<Row[]> {
     try {
       const acc = await parsedAccount(v('VEXA_TOKEN_MINT'));
       const ok = acc?.data?.parsed?.type === 'mint';
-      rows.push({ group: G, check: '$VEXA mint', status: ok ? 'PASS' : 'FAIL', detail: ok ? 'mint exists' : 'not a mint on this cluster' });
+      rows.push({
+        group: G,
+        check: '$VEXA mint',
+        status: ok ? 'PASS' : 'FAIL',
+        detail: ok ? 'mint exists' : 'not a mint on this cluster',
+      });
     } catch (e) {
       rows.push({ group: G, check: '$VEXA mint', status: 'FAIL', detail: errMsg(e) });
     }
@@ -616,7 +957,9 @@ async function probeNear(): Promise<Row[]> {
       group: G,
       check: 'RPC / network',
       status: ok ? 'PASS' : 'FAIL',
-      detail: ok ? `${status.chain_id}, block ${status.sync_info?.latest_block_height}` : `RPC chain_id is ${status.chain_id}, NEAR_NETWORK is ${network}`,
+      detail: ok
+        ? `${status.chain_id}, block ${status.sync_info?.latest_block_height}`
+        : `RPC chain_id is ${status.chain_id}, NEAR_NETWORK is ${network}`,
     });
     if (!ok) return rows;
   } catch (e) {
@@ -624,7 +967,8 @@ async function probeNear(): Promise<Row[]> {
     return rows;
   }
 
-  const viewAccount = (account_id: string) => rpc<any>(url, 'query', { request_type: 'view_account', finality: 'final', account_id });
+  const viewAccount = (account_id: string) =>
+    rpc<any>(url, 'query', { request_type: 'view_account', finality: 'final', account_id });
 
   // Deployer account + key
   if (valid.has('NEAR_DEPLOYER_ACCOUNT_ID')) {
@@ -640,24 +984,48 @@ async function probeNear(): Promise<Row[]> {
         detail: `${id}: ${near.toFixed(3)} NEAR${near >= minNear ? '' : ` (needs >= ${minNear} NEAR)`}`,
       });
     } catch (e) {
-      rows.push({ group: G, check: 'Deployer account', status: 'FAIL', detail: `${id}: ${errMsg(e)}` });
+      rows.push({
+        group: G,
+        check: 'Deployer account',
+        status: 'FAIL',
+        detail: `${id}: ${errMsg(e)}`,
+      });
     }
 
-    const pub = valid.has('NEAR_DEPLOYER_PRIVATE_KEY') ? nearKeyPublic(v('NEAR_DEPLOYER_PRIVATE_KEY')) : null;
+    const pub = valid.has('NEAR_DEPLOYER_PRIVATE_KEY')
+      ? nearKeyPublic(v('NEAR_DEPLOYER_PRIVATE_KEY'))
+      : null;
     if (!pub) {
-      rows.push({ group: G, check: 'Deployer access key', status: 'SKIP', detail: 'blocked: fix NEAR_DEPLOYER_PRIVATE_KEY first' });
+      rows.push({
+        group: G,
+        check: 'Deployer access key',
+        status: 'SKIP',
+        detail: 'blocked: fix NEAR_DEPLOYER_PRIVATE_KEY first',
+      });
     } else {
       try {
-        const ak = await rpc<any>(url, 'query', { request_type: 'view_access_key', finality: 'final', account_id: id, public_key: pub });
+        const ak = await rpc<any>(url, 'query', {
+          request_type: 'view_access_key',
+          finality: 'final',
+          account_id: id,
+          public_key: pub,
+        });
         const full = ak.permission === 'FullAccess';
         rows.push({
           group: G,
           check: 'Deployer access key',
           status: full ? 'PASS' : 'FAIL',
-          detail: full ? `${pub} is a full-access key` : `${pub} is a function-call key; deploy needs full access`,
+          detail: full
+            ? `${pub} is a full-access key`
+            : `${pub} is a function-call key; deploy needs full access`,
         });
       } catch (e) {
-        rows.push({ group: G, check: 'Deployer access key', status: 'FAIL', detail: `${pub} not on ${id}: ${errMsg(e)}` });
+        rows.push({
+          group: G,
+          check: 'Deployer access key',
+          status: 'FAIL',
+          detail: `${pub} not on ${id}: ${errMsg(e)}`,
+        });
       }
     }
   }
@@ -666,7 +1034,12 @@ async function probeNear(): Promise<Row[]> {
   if (valid.has('NEAR_MPC_CONTRACT_ID')) {
     const mpc = v('NEAR_MPC_CONTRACT_ID');
     if (mpc !== CANONICAL_MPC[network]) {
-      rows.push({ group: G, check: 'MPC contract id', status: 'WARN', detail: `expected ${CANONICAL_MPC[network]} on ${network}` });
+      rows.push({
+        group: G,
+        check: 'MPC contract id',
+        status: 'WARN',
+        detail: `expected ${CANONICAL_MPC[network]} on ${network}`,
+      });
     }
     try {
       const res = await rpc<any>(url, 'query', {
@@ -674,7 +1047,9 @@ async function probeNear(): Promise<Row[]> {
         finality: 'final',
         account_id: mpc,
         method_name: 'public_key',
-        args_base64: Buffer.from(JSON.stringify({ domain_id: MPC_ED25519_DOMAIN_ID })).toString('base64'),
+        args_base64: Buffer.from(JSON.stringify({ domain_id: MPC_ED25519_DOMAIN_ID })).toString(
+          'base64',
+        ),
       });
       const key = JSON.parse(Buffer.from(res.result).toString());
       const isEd = typeof key === 'string' && key.startsWith('ed25519:');
@@ -682,14 +1057,26 @@ async function probeNear(): Promise<Row[]> {
         group: G,
         check: 'MPC signer (Ed25519)',
         status: isEd ? 'PASS' : 'WARN',
-        detail: isEd ? `${mpc} exposes an Ed25519 domain (needed for Solana)` : `${mpc} reachable, but domain ${MPC_ED25519_DOMAIN_ID} is not Ed25519`,
+        detail: isEd
+          ? `${mpc} exposes an Ed25519 domain (needed for Solana)`
+          : `${mpc} reachable, but domain ${MPC_ED25519_DOMAIN_ID} is not Ed25519`,
       });
     } catch (e) {
       try {
         await viewAccount(mpc);
-        rows.push({ group: G, check: 'MPC signer (Ed25519)', status: 'WARN', detail: `${mpc} exists but Ed25519 domain lookup failed: ${errMsg(e)}` });
+        rows.push({
+          group: G,
+          check: 'MPC signer (Ed25519)',
+          status: 'WARN',
+          detail: `${mpc} exists but Ed25519 domain lookup failed: ${errMsg(e)}`,
+        });
       } catch (e2) {
-        rows.push({ group: G, check: 'MPC signer (Ed25519)', status: 'FAIL', detail: `${mpc}: ${errMsg(e2)}` });
+        rows.push({
+          group: G,
+          check: 'MPC signer (Ed25519)',
+          status: 'FAIL',
+          detail: `${mpc}: ${errMsg(e2)}`,
+        });
       }
     }
   }
@@ -700,9 +1087,19 @@ async function probeNear(): Promise<Row[]> {
     try {
       const acc = await viewAccount(id);
       const deployed = acc.code_hash && acc.code_hash !== '11111111111111111111111111111111';
-      rows.push({ group: G, check: 'Policy contract', status: deployed ? 'PASS' : 'PENDING', detail: deployed ? `${id} has code deployed` : `${id} exists, no code yet` });
+      rows.push({
+        group: G,
+        check: 'Policy contract',
+        status: deployed ? 'PASS' : 'PENDING',
+        detail: deployed ? `${id} has code deployed` : `${id} exists, no code yet`,
+      });
     } catch (e) {
-      rows.push({ group: G, check: 'Policy contract', status: 'PENDING', detail: `${id}: ${errMsg(e)} (created in Phase 3)` });
+      rows.push({
+        group: G,
+        check: 'Policy contract',
+        status: 'PENDING',
+        detail: `${id}: ${errMsg(e)} (created in Phase 3)`,
+      });
     }
   }
 
@@ -719,14 +1116,31 @@ async function probeIntents(): Promise<Row[]> {
   try {
     const { status, body } = await fetchJson(`${base}/v0/tokens`, { headers });
     if (status !== 200 || !Array.isArray(body)) {
-      return [{ group: G, check: '1Click API', status: 'FAIL', detail: `GET /v0/tokens -> ${status}${status === 401 ? ' (JWT rejected)' : ''}` }];
+      return [
+        {
+          group: G,
+          check: '1Click API',
+          status: 'FAIL',
+          detail: `GET /v0/tokens -> ${status}${status === 401 ? ' (JWT rejected)' : ''}`,
+        },
+      ];
     }
     const hasZec = body.some((t: any) => String(t.symbol).toUpperCase() === 'ZEC');
-    const hasSolUsdc = body.some((t: any) => String(t.symbol).toUpperCase() === 'USDC' && String(t.blockchain).toLowerCase() === 'sol');
+    const hasSolUsdc = body.some(
+      (t: any) =>
+        String(t.symbol).toUpperCase() === 'USDC' && String(t.blockchain).toLowerCase() === 'sol',
+    );
     const ok = hasZec && hasSolUsdc;
-    const route = ok ? 'USDC(sol) and ZEC both routable' : `missing: ${[!hasSolUsdc && 'USDC on sol', !hasZec && 'ZEC'].filter(Boolean).join(', ')}`;
+    const route = ok
+      ? 'USDC(sol) and ZEC both routable'
+      : `missing: ${[!hasSolUsdc && 'USDC on sol', !hasZec && 'ZEC'].filter(Boolean).join(', ')}`;
     return [
-      { group: G, check: '1Click API', status: ok ? 'PASS' : 'WARN', detail: `${body.length} tokens; ${route}` },
+      {
+        group: G,
+        check: '1Click API',
+        status: ok ? 'PASS' : 'WARN',
+        detail: `${body.length} tokens; ${route}`,
+      },
       {
         group: G,
         check: '1Click JWT',
@@ -741,19 +1155,30 @@ async function probeIntents(): Promise<Row[]> {
 
 async function probeGithub(): Promise<Row[]> {
   const G = 'GitHub';
-  if (!v('GITHUB_TOKEN')) return [{ group: G, check: 'Token', status: 'SKIP', detail: 'not set (CI only)' }];
-  const headers = { authorization: `Bearer ${v('GITHUB_TOKEN')}`, 'user-agent': 'vexa-check-env', accept: 'application/vnd.github+json' };
+  if (!v('GITHUB_TOKEN'))
+    return [{ group: G, check: 'Token', status: 'SKIP', detail: 'not set (CI only)' }];
+  const headers = {
+    authorization: `Bearer ${v('GITHUB_TOKEN')}`,
+    'user-agent': 'vexa-check-env',
+    accept: 'application/vnd.github+json',
+  };
   try {
     const me = await fetchJson('https://api.github.com/user', { headers });
-    if (me.status !== 200) return [{ group: G, check: 'Token', status: 'FAIL', detail: `GET /user -> ${me.status}` }];
-    const repo = await fetchJson('https://api.github.com/repos/AlexSkidanov/vexa-finance', { headers });
+    if (me.status !== 200)
+      return [{ group: G, check: 'Token', status: 'FAIL', detail: `GET /user -> ${me.status}` }];
+    const repo = await fetchJson('https://api.github.com/repos/AlexSkidanov/vexa-finance', {
+      headers,
+    });
     return [
       { group: G, check: 'Token', status: 'PASS', detail: `authenticated as ${me.body.login}` },
       {
         group: G,
         check: 'Repo AlexSkidanov/vexa-finance',
         status: repo.status === 200 ? 'PASS' : 'WARN',
-        detail: repo.status === 200 ? 'accessible' : `-> ${repo.status} (not created yet, or token lacks access)`,
+        detail:
+          repo.status === 200
+            ? 'accessible'
+            : `-> ${repo.status} (not created yet, or token lacks access)`,
       },
     ];
   } catch (e) {
@@ -767,13 +1192,29 @@ function crossChecks(): Row[] {
   const cluster = v('SOLANA_CLUSTER');
   const near = v('NEAR_NETWORK');
   if (cluster === 'mainnet-beta' && near === 'testnet') {
-    rows.push({ group: G, check: 'Solana vs NEAR network', status: 'WARN', detail: 'Solana mainnet with NEAR testnet MPC: agent keys would be secured by the testnet signer' });
+    rows.push({
+      group: G,
+      check: 'Solana vs NEAR network',
+      status: 'WARN',
+      detail:
+        'Solana mainnet with NEAR testnet MPC: agent keys would be secured by the testnet signer',
+    });
   }
   if (cluster === 'devnet' && near === 'mainnet') {
-    rows.push({ group: G, check: 'Solana vs NEAR network', status: 'WARN', detail: 'Solana devnet with NEAR mainnet: real NEAR spent on test traffic' });
+    rows.push({
+      group: G,
+      check: 'Solana vs NEAR network',
+      status: 'WARN',
+      detail: 'Solana devnet with NEAR mainnet: real NEAR spent on test traffic',
+    });
   }
   if (v('NODE_ENV') === 'production' && cluster === 'devnet') {
-    rows.push({ group: G, check: 'NODE_ENV vs cluster', status: 'WARN', detail: 'NODE_ENV=production on devnet' });
+    rows.push({
+      group: G,
+      check: 'NODE_ENV vs cluster',
+      status: 'WARN',
+      detail: 'NODE_ENV=production on devnet',
+    });
   }
   if (valid.has('WEBAUTHN_RP_ID') && valid.has('WEBAUTHN_ORIGINS')) {
     const rp = v('WEBAUTHN_RP_ID');
@@ -788,11 +1229,21 @@ function crossChecks(): Row[] {
       group: G,
       check: 'WebAuthn RP ID vs origins',
       status: bad.length ? 'FAIL' : 'PASS',
-      detail: bad.length ? `RP ID ${rp} is not a suffix of: ${bad.join(', ')}` : `all origins are under ${rp}`,
+      detail: bad.length
+        ? `RP ID ${rp} is not a suffix of: ${bad.join(', ')}`
+        : `all origins are under ${rp}`,
     });
   }
-  if (valid.has('API_KEY_ENCRYPTION_KEY') && v('API_KEY_ENCRYPTION_KEY') === v('VIEW_KEY_ENCRYPTION_KEY')) {
-    rows.push({ group: G, check: 'Key reuse', status: 'FAIL', detail: 'API_KEY_ENCRYPTION_KEY and VIEW_KEY_ENCRYPTION_KEY must differ' });
+  if (
+    valid.has('API_KEY_ENCRYPTION_KEY') &&
+    v('API_KEY_ENCRYPTION_KEY') === v('VIEW_KEY_ENCRYPTION_KEY')
+  ) {
+    rows.push({
+      group: G,
+      check: 'Key reuse',
+      status: 'FAIL',
+      detail: 'API_KEY_ENCRYPTION_KEY and VIEW_KEY_ENCRYPTION_KEY must differ',
+    });
   }
   return rows;
 }
@@ -801,7 +1252,13 @@ function crossChecks(): Row[] {
 // Main
 // ---------------------------------------------------------------------------
 
-const COLORS: Record<Status, string> = { PASS: '32', FAIL: '31', WARN: '33', PENDING: '36', SKIP: '90' };
+const COLORS: Record<Status, string> = {
+  PASS: '32',
+  FAIL: '31',
+  WARN: '33',
+  PENDING: '36',
+  SKIP: '90',
+};
 const tty = process.stdout.isTTY;
 const color = (s: Status, text: string) => (tty ? `\x1b[${COLORS[s]}m${text}\x1b[0m` : text);
 
@@ -817,13 +1274,17 @@ function printTable(rows: Row[]) {
   for (const r of rows) {
     if (last && r.group !== last) console.log('');
     last = r.group;
-    console.log(`${r.group.padEnd(w.group)}  ${r.check.padEnd(w.check)}  ${color(r.status, r.status.padEnd(7))}  ${redact(r.detail)}`);
+    console.log(
+      `${r.group.padEnd(w.group)}  ${r.check.padEnd(w.check)}  ${color(r.status, r.status.padEnd(7))}  ${redact(r.detail)}`,
+    );
   }
 }
 
 async function main() {
   if (!existsSync(ENV_PATH)) {
-    console.error(`No .env found at ${ENV_PATH}.\nRun: cp .env.example .env  then fill it in (see docs/SETUP.md).`);
+    console.error(
+      `No .env found at ${ENV_PATH}.\nRun: cp .env.example .env  then fill it in (see docs/SETUP.md).`,
+    );
     process.exit(1);
   }
   const parsed = config({ path: ENV_PATH, override: true, quiet: true } as any).parsed ?? {};
@@ -838,8 +1299,14 @@ async function main() {
   for (const s of SPECS) {
     const value = env[s.key]!;
     if (!value) {
-      const status: Status = s.level === 'required' ? 'FAIL' : s.level === 'later' ? 'PENDING' : 'SKIP';
-      const detail = s.level === 'required' ? 'missing' : s.level === 'later' ? `set in ${s.note ?? 'a later phase'}` : 'not set';
+      const status: Status =
+        s.level === 'required' ? 'FAIL' : s.level === 'later' ? 'PENDING' : 'SKIP';
+      const detail =
+        s.level === 'required'
+          ? 'missing'
+          : s.level === 'later'
+            ? `set in ${s.note ?? 'a later phase'}`
+            : 'not set';
       rows.push({ group: s.group, check: s.key, status, detail });
       continue;
     }
@@ -847,16 +1314,28 @@ async function main() {
     if (r.success) {
       valid.add(s.key);
       let detail = s.secret ? 'set (hidden)' : 'ok';
-      if (s.key === 'SOLANA_FEE_PAYER_KEYPAIR' || s.key === 'SOLANA_ADMIN_KEYPAIR') detail = `pubkey ${solanaKeypairPubkey(value)}`;
+      if (s.key === 'SOLANA_FEE_PAYER_KEYPAIR' || s.key === 'SOLANA_ADMIN_KEYPAIR')
+        detail = `pubkey ${solanaKeypairPubkey(value)}`;
       if (s.key === 'NEAR_DEPLOYER_PRIVATE_KEY') detail = `public ${nearKeyPublic(value)}`;
       rows.push({ group: s.group, check: s.key, status: 'PASS', detail });
     } else {
-      rows.push({ group: s.group, check: s.key, status: 'FAIL', detail: r.error.issues.map((i) => i.message).join('; ') });
+      rows.push({
+        group: s.group,
+        check: s.key,
+        status: 'FAIL',
+        detail: r.error.issues.map((i) => i.message).join('; '),
+      });
     }
   }
 
   // 2. Connectivity (in parallel)
-  const probes = await Promise.all([probeSupabase(), probeSolana(), probeNear(), probeIntents(), probeGithub()]);
+  const probes = await Promise.all([
+    probeSupabase(),
+    probeSolana(),
+    probeNear(),
+    probeIntents(),
+    probeGithub(),
+  ]);
   const probeRows = [...crossChecks(), ...probes.flat()];
 
   console.log('\nVexa environment check\n======================\n');

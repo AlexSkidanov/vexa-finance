@@ -1,0 +1,40 @@
+name: Bug report
+description: Something in the API, SDK or on-chain programs isn't working as expected.
+labels: ['bug']
+body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - API (apps/api)
+        - SDK (packages/sdk)
+        - Core (packages/core)
+        - Vault program (programs/vault)
+        - NEAR policy contract (contracts/near-policy)
+        - Database / migrations
+        - Docs
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: A minimal script, request or test case. Redact API keys and never paste private keys.
+      render: shell
+  - type: input
+    id: tx
+    attributes:
+      label: Transaction signature or request ID
+      description: If relevant, the Solana tx signature, NEAR tx hash or the `x-request-id` header from the API.
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
