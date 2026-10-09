@@ -54,7 +54,7 @@ sequenceDiagram
 
   U->>A: POST /v1/auth/otp {email}
   A->>S: signInWithOtp
-  S-->>U: 6-digit code by email
+  S-->>U: one-time code by email
   U->>A: POST /v1/auth/otp/verify {email, code}
   A->>S: verifyOtp
   A-->>U: session

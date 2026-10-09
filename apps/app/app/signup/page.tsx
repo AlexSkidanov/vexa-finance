@@ -86,7 +86,7 @@ function EmailStep({
         <p className="eyebrow">Create account · 1 of 5</p>
         <h1 className="page-title">Start with your email.</h1>
         <p className="page-lede">
-          We’ll send a six-digit code. Your email is for account recovery notices and receipts; it’s
+          We’ll send a one-time code. Your email is for account recovery notices and receipts; it’s
           never linked on-chain.
         </p>
       </div>

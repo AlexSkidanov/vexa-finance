@@ -58,7 +58,7 @@ The fully private neobank on Solana, secured by NEAR and ZEC.<br>
 </html>`;
 }
 
-/** The six-digit code that verifies an email address at sign-up and sign-in. */
+/** The one-time code that verifies an email address at sign-up and sign-in. */
 export function signInCodeEmail(to: string, code: string): Email {
   if (!/^\d{6,10}$/.test(code)) throw new Error('sign-in code must be digits');
   const body = `
