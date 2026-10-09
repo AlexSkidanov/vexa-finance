@@ -21,6 +21,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@solana/kit": "^8.3.0",
     "@vexa/core": "workspace:*"
   },
   "peerDependencies": {

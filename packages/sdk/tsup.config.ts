@@ -6,5 +6,5 @@ export default defineConfig({
   dts: true,
   clean: true,
   sourcemap: true,
-  external: ['@solana/zk-sdk'],
+  external: ['@solana/zk-sdk', '@solana/kit', '@vexa/core'],
 });

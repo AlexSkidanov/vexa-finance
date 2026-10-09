@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { ed25519, ristretto255 } from '@noble/curves/ed25519.js';
 import { base58Encode, base64Encode, handleClaimMessage, type Session } from '@vexa/core';
 import { createApp } from '../src/app.js';
-import type { Deps } from '../src/context.js';
+import type { Deps, VaultAddresses } from '../src/context.js';
+import type { Chain } from '../src/chain/chain.js';
 import { loadEnv } from '../src/env.js';
 import { createLogger } from '../src/logger.js';
 import type { AuthProvider } from '../src/lib/auth-provider.js';
@@ -23,6 +24,11 @@ export const TEST_ENV = loadEnv({
   SUPABASE_SERVICE_ROLE_KEY: 'sb_secret_test_test_test_test',
   SUPABASE_DB_URL: 'postgresql://localhost/test',
   SOLANA_CLUSTER: 'mainnet-beta',
+  ALCHEMY_SOLANA_RPC_URL: 'http://127.0.0.1:8899',
+  SOLANA_FEE_PAYER_KEYPAIR: '1'.repeat(88),
+  VAULT_PROGRAM_ID: '3g2JPX4roASUJVacf68sBSpARk5m9B3hu9xeaE6mTjPR',
+  USDC_MINT: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+  CUSDC_MINT: '4STXpFN2mQSt12XG4os7ftLXHbBq5PVWYCAahToRt6QQ',
   LOG_LEVEL: 'silent',
 });
 
@@ -66,6 +72,25 @@ export function fakeAuthProvider(overrides: Partial<AuthProvider> = {}): AuthPro
   };
 }
 
+/** A chain for tests that shouldn't touch Solana: any use is a test bug. */
+export const offlineChain: Chain = new Proxy({} as Chain, {
+  get(_, prop) {
+    if (prop === 'feePayer') return '11111111111111111111111111111111';
+    return () => {
+      throw new Error(`test touched the chain (${String(prop)})`);
+    };
+  },
+});
+
+export const TEST_VAULT = {
+  program: '3g2JPX4roASUJVacf68sBSpARk5m9B3hu9xeaE6mTjPR',
+  config: '7Q3LNA4P3J7H4zNdHJEephe2XEvBPKPUJsqGifexRopw',
+  usdcMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+  cusdcMint: '4STXpFN2mQSt12XG4os7ftLXHbBq5PVWYCAahToRt6QQ',
+  usdcReserve: '8eeishQYvtHwwM8QRN9629zzU9hBn18dGFW5T75ytqz6',
+  fees: '4PAtQdQRVfozc2F8x4eJF1oHhAQ6EMfX5EqBgPGnj29u',
+} as VaultAddresses;
+
 export function testApp(overrides: Partial<Deps> = {}) {
   const deps: Deps = {
     env: TEST_ENV,
@@ -73,6 +98,8 @@ export function testApp(overrides: Partial<Deps> = {}) {
     store: createMemoryStore(),
     auth: fakeAuthProvider(),
     tokens: fakeTokens,
+    chain: offlineChain,
+    vault: TEST_VAULT,
     version: 'test',
     ...overrides,
   };

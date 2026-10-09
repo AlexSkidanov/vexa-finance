@@ -8,8 +8,9 @@
 //! ```text
 //!   deposit(amount)                          withdraw(amount)
 //!   ───────────────                          ────────────────
-//!   user USDC ──transfer──▶ reserve          user cUSDC (public) ──burn──▶ ∅
-//!   ∅ ──mint──▶ user cUSDC (public)          reserve ──transfer──▶ any USDC account
+//!   user USDC ──fee──▶ treasury              user cUSDC (public) ──burn──▶ ∅
+//!   user USDC ──rest──▶ reserve              reserve ──fee──▶ treasury
+//!   ∅ ──mint rest──▶ user cUSDC (public)     reserve ──rest──▶ any USDC account
 //!   user cUSDC public ──CT deposit──▶ pending
 //! ```
 //!
@@ -21,13 +22,15 @@
 //! transaction.
 //!
 //! Deposit and withdrawal amounts are public, as any USDC transfer is.
-//! Everything that happens while funds are cUSDC is not.
+//! Everything that happens while funds are cUSDC is not. That is also why the
+//! protocol fee is charged there and nowhere else: see [`fees`].
 //!
 //! ## Invariant
 //!
 //! USDC held by the reserve ≥ cUSDC supply. The config PDA is the only mint
 //! authority and the only reserve owner, and every mint is paired with a
-//! transfer in, every release with a burn.
+//! transfer in, every release with a burn. Fees go to the treasury, never
+//! through the reserve.
 //!
 //! ## Why Pinocchio
 //!
@@ -39,6 +42,7 @@
 #![cfg_attr(target_os = "solana", no_std)]
 
 pub mod error;
+pub mod fees;
 pub mod instruction;
 pub mod state;
 
@@ -76,5 +80,6 @@ pub fn process_instruction(
         VaultInstruction::Withdraw => processor::withdraw::process(accounts, args),
         VaultInstruction::SetPaused => processor::admin::set_paused(accounts, args),
         VaultInstruction::SetAdmin => processor::admin::set_admin(accounts),
+        VaultInstruction::SetFees => processor::admin::set_fees(accounts, args),
     }
 }

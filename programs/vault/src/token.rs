@@ -86,6 +86,12 @@ pub fn read_token_account(data: &[u8]) -> Result<(Address, Address), ProgramErro
     Ok((address_at(data, 0), address_at(data, 32)))
 }
 
+/// The `amount` of an initialized token account (Token or Token-2022).
+pub fn read_token_amount(data: &[u8]) -> Result<u64, ProgramError> {
+    read_token_account(data)?;
+    Ok(u64::from_le_bytes(data[64..72].try_into().unwrap()))
+}
+
 /// Iterates a Token-2022 account's extensions as (type, value). Accounts with
 /// no extensions yield nothing. `mint` selects the expected account type.
 pub fn extensions(data: &[u8], mint: bool) -> Result<Extensions<'_>, ProgramError> {

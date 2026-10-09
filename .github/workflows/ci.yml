@@ -30,7 +30,7 @@ jobs:
       - run: pnpm build
 
   vault:
-    name: Vault program (fmt, clippy, build, test)
+    name: Vault program and money flow (fmt, clippy, build, LiteSVM)
     runs-on: ubuntu-latest
     env:
       SOLANA_VERSION: v4.1.2
@@ -67,6 +67,20 @@ jobs:
       # LiteSVM tests against the freshly built binary, with the same runtime
       # and ZK SDK versions as mainnet.
       - run: cargo test -p vexa-vault
+
+      # The same binary, driven end to end from TypeScript: proofs built by the
+      # SDK, plans checked and co-signed by the API.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm turbo run build --filter=@vexa/core --filter=@vexa/sdk
+      - name: Money flow on LiteSVM
+        run: |
+          pnpm --filter @vexa/core exec vitest run test/flow.litesvm.test.ts
+          pnpm --filter @vexa/api exec vitest run test/money.litesvm.test.ts
 
   secrets:
     name: Secret scan

@@ -15,6 +15,11 @@
       "types": "./dist/crypto/index.d.ts",
       "import": "./dist/crypto/index.js",
       "require": "./dist/crypto/index.cjs"
+    },
+    "./solana": {
+      "types": "./dist/solana/index.d.ts",
+      "import": "./dist/solana/index.js",
+      "require": "./dist/solana/index.cjs"
     }
   },
   "files": [
@@ -26,8 +31,13 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@noble/ciphers": "^2",
     "@noble/curves": "^2.4.0",
     "@noble/hashes": "^2.0.0",
+    "@solana-program/compute-budget": "^0.19.0",
+    "@solana-program/system": "^0.15.0",
+    "@solana-program/token-2022": "^0.19.0",
+    "@solana/kit": "^8.3.0",
     "zod": "^4.1.0"
   },
   "peerDependencies": {
@@ -39,6 +49,7 @@
     }
   },
   "devDependencies": {
-    "@solana/zk-sdk": "0.5.3"
+    "@solana/zk-sdk": "0.5.3",
+    "litesvm": "1.5.0"
   }
 }

@@ -401,6 +401,164 @@ fn unknown_instructions_are_rejected() {
 }
 
 // ---------------------------------------------------------------------------
+// fees
+// ---------------------------------------------------------------------------
+
+/// Sets the launch schedule: 0.10%, capped at 5 USDC.
+fn charge_launch_fees(env: &mut Env, vexa_mint: Option<Pubkey>, tiers: &[(u64, u16)]) {
+    let admin = env.admin.insecure_clone();
+    let ix = set_fees_ix(&admin.pubkey(), &env.treasury, 10, 5 * USDC, vexa_mint, tiers);
+    env.send(&[ix], &admin, &[]).unwrap();
+}
+
+#[test]
+fn deposits_pay_the_fee_to_the_treasury_and_mint_the_rest() {
+    let mut env = setup();
+    charge_launch_fees(&mut env, None, &[]);
+    let alice = env.user(10_000);
+
+    // 0.10% of 100 USDC.
+    let ixs = [env.deposit_ix(&alice, 100 * USDC), env.apply_pending_ix(&alice, 99_900_000, 1)];
+    env.send(&ixs, &alice.kp, &[]).unwrap();
+    assert_eq!(env.usdc_balance(&env.treasury), 100_000);
+    assert_eq!(env.usdc_balance(&env.reserve), 99_900_000);
+    let (_, state) = env.cusdc_state(&alice);
+    assert_eq!(decrypt_available(&alice, &state), 99_900_000);
+
+    // 0.10% of 9,000 USDC is 9 USDC, over the 5 USDC cap.
+    env.send(&[env.deposit_ix(&alice, 9_000 * USDC)], &alice.kp, &[]).unwrap();
+    assert_eq!(env.usdc_balance(&env.treasury), 100_000 + 5 * USDC);
+    assert_eq!(env.usdc_balance(&env.reserve), env.cusdc_supply());
+}
+
+#[test]
+fn withdrawals_pay_the_fee_out_of_what_is_released() {
+    let mut env = setup();
+    let alice = env.user(50);
+    let ixs = [env.deposit_ix(&alice, 50 * USDC), env.apply_pending_ix(&alice, 50 * USDC, 1)];
+    env.send(&ixs, &alice.kp, &[]).unwrap();
+    charge_launch_fees(&mut env, None, &[]);
+
+    let ixs = withdraw_ixs(&env, &alice, &alice.usdc, 20 * USDC, 50 * USDC);
+    env.send(&ixs, &alice.kp, &[]).unwrap();
+    assert_eq!(env.usdc_balance(&alice.usdc), 20 * USDC - 20_000);
+    assert_eq!(env.usdc_balance(&env.treasury), 20_000);
+    assert_eq!(env.usdc_balance(&env.reserve), 30 * USDC);
+    assert_eq!(env.cusdc_supply(), 30 * USDC);
+}
+
+#[test]
+fn fees_must_go_to_the_recorded_treasury() {
+    let mut env = setup();
+    charge_launch_fees(&mut env, None, &[]);
+    let alice = env.user(10);
+    let mut ix = env.deposit_ix(&alice, USDC);
+    ix.accounts[10].pubkey = alice.usdc; // pay the "fee" back to herself
+    let err = env.send(&[ix], &alice.kp, &[]).unwrap_err();
+    assert!(err.contains(&code(VaultError::ConfigMismatch)), "{err}");
+
+    let mut ix = env.deposit_ix(&alice, USDC);
+    ix.accounts.truncate(9); // or leave the schedule out entirely
+    let err = env.send(&[ix], &alice.kp, &[]).unwrap_err();
+    assert!(err.contains("NotEnoughAccountKeys"), "{err}");
+}
+
+#[test]
+fn an_amount_that_only_covers_the_fee_is_refused() {
+    let mut env = setup();
+    charge_launch_fees(&mut env, None, &[]);
+    let alice = env.user(1);
+    // One base unit: the fee rounds up to one unit, leaving nothing to mint.
+    let err = env.send(&[env.deposit_ix(&alice, 1)], &alice.kp, &[]).unwrap_err();
+    assert!(err.contains(&code(VaultError::AmountBelowFee)), "{err}");
+    env.send(&[env.deposit_ix(&alice, 2)], &alice.kp, &[]).unwrap();
+    assert_eq!(env.usdc_balance(&env.treasury), 1);
+}
+
+#[test]
+fn holding_vexa_discounts_the_fee() {
+    let mut env = setup();
+    let admin = env.admin.insecure_clone();
+    let vexa_mint = create_usdc_mint(&mut env.svm, &admin, &admin.pubkey());
+    charge_launch_fees(
+        &mut env,
+        Some(vexa_mint),
+        &[(1_000 * USDC, 5_000), (10_000 * USDC, 10_000)],
+    );
+    let alice = env.user(1_000);
+    let bob = env.user(1_000);
+
+    // Alice holds 2,000 $VEXA: half off. Bob presents Alice's account: refused.
+    let alice_vexa = get_associated_token_address_with_program_id(
+        &alice.kp.pubkey(),
+        &vexa_mint,
+        &spl_token_interface::id(),
+    );
+    let ixs = [
+        spl_associated_token_account_interface::instruction::create_associated_token_account(
+            &admin.pubkey(),
+            &alice.kp.pubkey(),
+            &vexa_mint,
+            &spl_token_interface::id(),
+        ),
+        spl_token_interface::instruction::mint_to(
+            &spl_token_interface::id(),
+            &vexa_mint,
+            &alice_vexa,
+            &admin.pubkey(),
+            &[],
+            2_000 * USDC,
+        )
+        .unwrap(),
+    ];
+    env.send(&ixs, &admin, &[]).unwrap();
+
+    env.send(&[env.deposit_ix_with(&alice, 100 * USDC, Some(alice_vexa))], &alice.kp, &[]).unwrap();
+    assert_eq!(env.usdc_balance(&env.treasury), 50_000);
+
+    let err = env
+        .send(&[env.deposit_ix_with(&bob, 100 * USDC, Some(alice_vexa))], &bob.kp, &[])
+        .unwrap_err();
+    assert!(err.contains(&code(VaultError::TokenOwnerMismatch)), "{err}");
+
+    // Without a $VEXA account, the full fee.
+    env.send(&[env.deposit_ix(&bob, 100 * USDC)], &bob.kp, &[]).unwrap();
+    assert_eq!(env.usdc_balance(&env.treasury), 150_000);
+}
+
+#[test]
+fn only_the_admin_sets_fees_and_never_above_the_ceiling() {
+    let mut env = setup();
+    let alice = env.user(1);
+    let admin = env.admin.insecure_clone();
+
+    let ix = set_fees_ix(&alice.kp.pubkey(), &env.treasury, 10, USDC, None, &[]);
+    let err = env.send(&[ix], &alice.kp, &[]).unwrap_err();
+    assert!(err.contains(&code(VaultError::NotAdmin)), "{err}");
+
+    let max = vault::fees::MAX_FEE_BPS;
+    let ix = set_fees_ix(&admin.pubkey(), &env.treasury, max + 1, USDC, None, &[]);
+    let err = env.send(&[ix], &admin, &[]).unwrap_err();
+    assert!(err.contains(&code(VaultError::InvalidFeeSchedule)), "{err}");
+
+    // The treasury must be a USDC account.
+    let ix = set_fees_ix(&admin.pubkey(), &alice.cusdc, 10, USDC, None, &[]);
+    assert!(env.send(&[ix], &admin, &[]).is_err());
+
+    env.send(&[set_fees_ix(&admin.pubkey(), &env.treasury, max, USDC, None, &[])], &admin, &[])
+        .unwrap();
+}
+
+#[test]
+fn a_vault_without_a_fee_schedule_moves_nothing() {
+    let mut env = setup_with(false);
+    let alice = env.user(10);
+    let err = env.send(&[env.deposit_ix(&alice, USDC)], &alice.kp, &[]).unwrap_err();
+    assert!(err.contains(&code(VaultError::FeesNotSet)), "{err}");
+    assert_eq!(env.usdc_balance(&alice.usdc), 10 * USDC);
+}
+
+// ---------------------------------------------------------------------------
 // invariant
 // ---------------------------------------------------------------------------
 
