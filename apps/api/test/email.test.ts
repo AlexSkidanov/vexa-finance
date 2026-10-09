@@ -8,7 +8,7 @@ describe('sign-in code email', () => {
     expect(email.to).toBe('ada@example.com');
     expect(email.subject).toBe('482913 is your Vexa code');
     expect(email.html).toContain('482913');
-    expect(email.html).toContain('https://vexa.finance/email/vexa-mark.png');
+    expect(email.html).toContain('https://vexa.finance/email/vexa-mark-dark.png');
     expect(email.text).toContain('Your Vexa code is 482913');
   });
 
