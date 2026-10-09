@@ -54,9 +54,18 @@ export function getHealth(): Promise<Health> {
 export type KeyScheme = 'ed25519' | 'secp256k1' | 'ml-dsa-65';
 export const POST_QUANTUM_SCHEMES: readonly KeyScheme[] = ['ml-dsa-65'];
 
+/**
+ * NEAR stores ML-DSA-65 keys as a SHA3-256 hash of the 1,952-byte key, so
+ * view_access_key_list returns them as `ml-dsa-65-hash:<base58>`.
+ */
+export function keyScheme(publicKey: string): KeyScheme | string {
+  const prefix = publicKey.slice(0, publicKey.indexOf(':'));
+  return prefix === 'ml-dsa-65-hash' ? 'ml-dsa-65' : prefix;
+}
+
 export interface AccountKeys {
   /** Every access key on the account, by scheme. */
-  schemes: KeyScheme[];
+  schemes: (KeyScheme | string)[];
   /** True when every full-access key uses a post-quantum scheme. */
   postQuantum: boolean;
 }
@@ -87,13 +96,15 @@ export function getAccountKeys(accountId: string): Promise<AccountKeys | null> {
       const keys = body.result?.keys;
       if (!Array.isArray(keys) || keys.length === 0) return null;
       const parsed = keys.map((k) => ({
-        scheme: k.public_key.slice(0, k.public_key.indexOf(':')) as KeyScheme,
+        scheme: keyScheme(k.public_key),
         full: k.access_key.permission === 'FullAccess',
       }));
       const full = parsed.filter((k) => k.full);
       return {
         schemes: parsed.map((k) => k.scheme),
-        postQuantum: full.length > 0 && full.every((k) => POST_QUANTUM_SCHEMES.includes(k.scheme)),
+        postQuantum:
+          full.length > 0 &&
+          full.every((k) => (POST_QUANTUM_SCHEMES as readonly string[]).includes(k.scheme)),
       };
     })
     .catch(() => null)
