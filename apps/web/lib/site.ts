@@ -21,6 +21,14 @@ export const DOCS = {
   changelog: `${blob}/CHANGELOG.md`,
   architecture: `${blob}/docs/ARCHITECTURE.md`,
   security: `${blob}/SECURITY.md`,
+  quantum: `${blob}/docs/QUANTUM.md`,
+} as const;
+
+/** Near One's post-quantum write-ups and the release that shipped ML-DSA. */
+export const NEAR_PQ = {
+  intro: 'https://www.near.org/blog/making-near-protocol-post-quantum-safe',
+  roadmap: 'https://www.near.org/blog/near-quantum-safe-roadmap',
+  release: 'https://github.com/near/nearcore/releases/tag/2.13.0',
 } as const;
 export const STATUS_URL = `${API_URL}/health`;
 export const SECURITY_EMAIL = 'security@vexa.finance';
@@ -116,6 +124,7 @@ export const FOOTER: { title: string; links: { href: string; label: string }[] }
     title: 'Company',
     links: [
       { href: '/security/', label: 'Security' },
+      { href: '/quantum/', label: 'Quantum readiness' },
       { href: '/faq/', label: 'FAQ' },
       { href: '/about/', label: 'About' },
       { href: `mailto:${CONTACT_EMAIL}`, label: 'Contact' },

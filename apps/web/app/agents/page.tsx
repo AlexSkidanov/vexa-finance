@@ -123,6 +123,12 @@ export default function Agents() {
           </TLink>
         </p>
         <TierTable />
+        <p data-reveal="1" className="body-18" style={{ margin: '24px 0 0', maxWidth: 680 }}>
+          The policy contract lives on NEAR, which supports post-quantum ML-DSA keys on mainnet.{' '}
+          <TLink href="/quantum/" className="inline-link">
+            See quantum readiness.
+          </TLink>
+        </p>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 36 }}>
           <a href={APP_URL} className="btn btn-primary">
             Create an agent

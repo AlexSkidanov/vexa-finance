@@ -37,6 +37,10 @@ const FAQS: [string, string][] = [
     'What does a stealth transfer cost?',
     'About $0.60 in bridge fees plus 0.10% on the way out and 0.10% on the way back in. It takes 10 to 30 minutes and needs at least 5 USDC.',
   ],
+  [
+    'Is Vexa safe from quantum computers?',
+    "Not fully yet, and neither is any blockchain. NEAR, where agent limits are enforced, already supports post-quantum ML-DSA keys on mainnet, and Vexa's policy contract can move to them. Encrypted balances on Solana and the Zcash route depend on those networks upgrading. The Quantum readiness page shows the live status of each part.",
+  ],
 ];
 
 const jsonLd = {

@@ -15,7 +15,8 @@ export function Footer() {
             </span>
           </div>
           <div className="foot-tag">
-            The fully private neobank on Solana, secured by NEAR and ZEC.
+            The fully private neobank on Solana, secured by NEAR and ZEC. Preparing for Q-Day in the
+            open.
           </div>
         </div>
         {FOOTER.map((c) => (

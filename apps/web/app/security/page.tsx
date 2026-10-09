@@ -1,4 +1,6 @@
 import { LiveReserve } from '@/components/live-reserve';
+import { QuantumKey } from '@/components/quantum-key';
+import { TLink } from '@/components/transition';
 import { minCol, SubHero } from '@/components/ui';
 import { pageMeta } from '@/lib/meta';
 import {
@@ -141,6 +143,30 @@ export default function Security() {
                 </li>
               ))}
             </ul>
+          </div>
+        </div>
+        <h2
+          data-reveal="1"
+          className="h2-sm"
+          style={{ margin: '56px 0 24px', textWrap: 'initial' }}
+        >
+          Quantum readiness
+        </h2>
+        <div data-reveal="1" className="grid" style={{ ...minCol(300), gap: 24 }}>
+          <QuantumKey />
+          <div className="box" style={{ padding: 'clamp(20px,2.6vw,28px)' }}>
+            <div className="num-label" style={{ marginBottom: 12 }}>
+              Post-quantum on NEAR
+            </div>
+            <p style={{ font: '400 17px/1.45 var(--sans)', color: 'var(--body)', margin: 0 }}>
+              NEAR mainnet accepts ML-DSA-65 (NIST FIPS 204) keys, so the account that holds
+              Vexa&rsquo;s agent policy can move to post-quantum keys without changing its address.
+              Balances on Solana, agent wallets and stealth transfers depend on upstream work, and
+              we track each one in public.{' '}
+              <TLink href="/quantum/" className="inline-link">
+                See where every part stands.
+              </TLink>
+            </p>
           </div>
         </div>
         <p

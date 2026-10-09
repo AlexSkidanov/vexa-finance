@@ -29,6 +29,13 @@ export default function About() {
         </a>
         .
       </p>
+      <h2>Ready for what comes next</h2>
+      <p>
+        Quantum computers will one day break the cryptography most blockchains use. Vexa enforces
+        agent limits on NEAR, one of the first blockchains with post-quantum signatures on mainnet,
+        and publishes where every part of the product stands on{' '}
+        <TLink href="/quantum/">Quantum readiness</TLink>.
+      </p>
       <h2>Contact</h2>
       <p>
         Write to{' '}
