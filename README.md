@@ -29,6 +29,8 @@
     <span> | </span>
     <a href="docs/API.md">API reference</a>
     <span> | </span>
+    <a href="docs/QUANTUM.md">Quantum readiness</a>
+    <span> | </span>
     <a href="#contributing">Contributing</a>
   </h3>
 </div>
