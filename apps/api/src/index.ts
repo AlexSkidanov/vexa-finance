@@ -8,6 +8,7 @@ import { createApp } from './app.js';
 import { loadEnv } from './env.js';
 import { createLogger } from './logger.js';
 import { createSupabaseAuthProvider } from './lib/auth-provider.js';
+import { createResendMailer } from './lib/mailer.js';
 import { createSupabaseTokenVerifier } from './lib/tokens.js';
 import { createPostgresStore } from './store/postgres.js';
 import { createRpcChain } from './chain/chain.js';
@@ -90,6 +91,9 @@ const app = createApp({
     url: env.SUPABASE_URL,
     anonKey: env.SUPABASE_ANON_KEY,
     serviceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
+    mailer: env.RESEND_API_KEY
+      ? createResendMailer({ apiKey: env.RESEND_API_KEY, from: env.EMAIL_FROM })
+      : undefined,
   }),
   tokens: createSupabaseTokenVerifier({
     supabaseUrl: env.SUPABASE_URL,

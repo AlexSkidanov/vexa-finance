@@ -1,5 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Session } from '@vexa/core';
+import { signInCodeEmail } from './emails.js';
+import type { Mailer } from './mailer.js';
 
 export interface AuthProvider {
   sendEmailOtp(email: string): Promise<void>;
@@ -20,6 +22,8 @@ export function createSupabaseAuthProvider(opts: {
   url: string;
   anonKey: string;
   serviceRoleKey: string;
+  /** Sends sign-in codes in Vexa's own email. Without it, Supabase's built-in sender is used. */
+  mailer?: Mailer;
 }): AuthProvider {
   const clientOpts = { auth: { persistSession: false, autoRefreshToken: false } } as const;
   // A fresh anon client per call: supabase-js keeps the last session in the
@@ -48,11 +52,25 @@ export function createSupabaseAuthProvider(opts: {
 
   return {
     async sendEmailOtp(email) {
-      const { error } = await anon().auth.signInWithOtp({
-        email,
-        options: { shouldCreateUser: true },
-      });
-      if (error) throw error;
+      if (!opts.mailer) {
+        const { error } = await anon().auth.signInWithOtp({
+          email,
+          options: { shouldCreateUser: true },
+        });
+        if (error) throw error;
+        return;
+      }
+      // generateLink issues the same one-time code signInWithOtp would, without
+      // sending anything, so verifyEmailOtp below works unchanged. It needs the
+      // user to exist, which signInWithOtp would have handled for us.
+      let link = await admin.auth.admin.generateLink({ type: 'magiclink', email });
+      if (link.error) {
+        const created = await admin.auth.admin.createUser({ email });
+        if (created.error) throw link.error;
+        link = await admin.auth.admin.generateLink({ type: 'magiclink', email });
+        if (link.error) throw link.error;
+      }
+      await opts.mailer.send(signInCodeEmail(email, link.data.properties.email_otp));
     },
 
     async verifyEmailOtp(email, token) {

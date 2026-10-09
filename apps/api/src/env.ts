@@ -65,6 +65,11 @@ const EnvSchema = z.object({
   ZCASH_LIGHTWALLETD_URL: z.url().default('https://na.zec.rocks:443'),
   ZINGO_CLI_PATH: z.string().default('zingo-cli'),
   ZINGO_NYM_PROXY: z.string().optional(),
+
+  // Email. Without a Resend key, sign-in codes go through Supabase's built-in
+  // sender, which only reaches project members and is rate-limited.
+  RESEND_API_KEY: z.string().optional(),
+  EMAIL_FROM: z.string().default('Vexa <verify@vexa.finance>'),
 });
 
 export type Env = z.infer<typeof EnvSchema> & {
