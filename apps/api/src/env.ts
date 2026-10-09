@@ -66,9 +66,9 @@ const EnvSchema = z.object({
   ZINGO_CLI_PATH: z.string().default('zingo-cli'),
   ZINGO_NYM_PROXY: z.string().optional(),
 
-  // Email. Without a Resend key, sign-in codes go through Supabase's built-in
-  // sender, which only reaches project members and is rate-limited.
-  RESEND_API_KEY: z.string().optional(),
+  // Email. Without a Postmark token, sign-in codes go through Supabase's
+  // built-in sender, which only reaches project members and is rate-limited.
+  POSTMARK_SERVER_TOKEN: z.string().optional(),
   EMAIL_FROM: z.string().default('Vexa <verify@vexa.finance>'),
 });
 

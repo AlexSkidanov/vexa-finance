@@ -1,7 +1,7 @@
 /**
  * Transactional email. Supabase's built-in sender is for development only: it
  * delivers to project members and a few messages an hour. Production sends
- * through Resend with Vexa's own templates and a vexa.finance sender.
+ * through Postmark with Vexa's own templates and a vexa.finance sender.
  */
 export interface Email {
   to: string;
@@ -14,28 +14,39 @@ export interface Mailer {
   send(email: Email): Promise<void>;
 }
 
-export function createResendMailer(opts: {
-  apiKey: string;
+export function createPostmarkMailer(opts: {
+  serverToken: string;
   from: string;
   fetch?: typeof fetch;
 }): Mailer {
   const doFetch = opts.fetch ?? fetch;
   return {
     async send(email) {
-      const res = await doFetch('https://api.resend.com/emails', {
+      const res = await doFetch('https://api.postmarkapp.com/email', {
         method: 'POST',
         headers: {
-          authorization: `Bearer ${opts.apiKey}`,
+          accept: 'application/json',
           'content-type': 'application/json',
+          'x-postmark-server-token': opts.serverToken,
         },
-        body: JSON.stringify({ from: opts.from, ...email, to: [email.to] }),
+        body: JSON.stringify({
+          From: opts.from,
+          To: email.to,
+          Subject: email.subject,
+          HtmlBody: email.html,
+          TextBody: email.text,
+          MessageStream: 'outbound',
+          // Sign-in codes are one-off messages: no open or link tracking.
+          TrackOpens: false,
+          TrackLinks: 'None',
+        }),
         signal: AbortSignal.timeout(10_000),
       });
       if (!res.ok) {
-        // Resend's error body names the problem (unverified domain, bad key)
-        // and never echoes the message, so it's safe to log.
+        // Postmark's error body names the problem (unconfirmed sender, bad
+        // token) and never echoes the message, so it's safe to log.
         const detail = await res.text().catch(() => '');
-        throw new Error(`resend ${res.status}: ${detail.slice(0, 300)}`);
+        throw new Error(`postmark ${res.status}: ${detail.slice(0, 300)}`);
       }
     },
   };

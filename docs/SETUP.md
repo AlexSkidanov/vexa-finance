@@ -74,7 +74,7 @@ The RP ID must be the origin's hostname or a parent of it. Passkeys registered u
 6. Auth settings (no env values, but needed for Phase 1):
    - **Authentication** → **Sign In / Providers** → **Email**: enabled. Turn **Confirm email** on.
    - **Authentication** → **Emails** → **Templates** → **Magic Link**: replace the body with a code-based template containing `{{ .Token }}` so users get a 6-digit OTP instead of a link.
-   - **Authentication** → **Emails** → **SMTP Settings**: before real users, plug in your own SMTP (Resend, Postmark, SES). The built-in sender is heavily rate-limited.
+   - **Authentication** → **Emails**: nothing to change. The API sends sign-in codes itself through Postmark (section 14); Supabase's built-in sender is only the fallback.
    - **Authentication** → **URL Configuration** → **Site URL**: your frontend URL.
 
 Passkeys are handled by our API (WebAuthn via `@simplewebauthn/server`) with Supabase issuing the session, so Supabase itself needs no passkey settings.
@@ -315,13 +315,14 @@ pnpm upgrade:vault --authority ~/.config/vexa/upgrade-authority.json --execute  
 
 ## 14. Email
 
-Sign-in codes go out in Vexa's own template (`apps/api/src/lib/emails.ts`) through [Resend](https://resend.com). Supabase's built-in sender only delivers to project members, a few messages an hour, so production needs this.
+Sign-in codes go out in Vexa's own template (`apps/api/src/lib/emails.ts`) through [Postmark](https://postmarkapp.com). Supabase's built-in sender only delivers to project members, a few messages an hour, so production needs this.
 
-1. Create a Resend account and add the domain `vexa.finance`.
-2. Add the DNS records Resend shows (SPF, DKIM and the bounce MX on a `send` subdomain) to the Netlify DNS zone for vexa.finance, and wait for Resend to mark the domain verified.
-3. Create an API key with sending access only and set `RESEND_API_KEY`. `EMAIL_FROM` defaults to `Vexa <verify@vexa.finance>`.
+1. Create a Postmark account and a server named `vexa`, then add the sender domain `vexa.finance` under **Sender Signatures → Domains**.
+2. Add the DKIM TXT record and the Return-Path CNAME that Postmark shows to the Netlify DNS zone for vexa.finance, and wait for both to verify.
+3. Copy the server's API token (**Servers → vexa → API Tokens**) into `POSTMARK_SERVER_TOKEN`. `EMAIL_FROM` defaults to `Vexa <verify@vexa.finance>`.
+4. New Postmark accounts can only send to addresses on their own domain until Postmark approves the account, so request approval before launch.
 
-The API asks Supabase to generate the one-time code without sending it, then sends it itself, so verification is unchanged. Without `RESEND_API_KEY` it falls back to Supabase's sender.
+The API asks Supabase to generate the one-time code without sending it, then sends it itself, so verification is unchanged. Without `POSTMARK_SERVER_TOKEN` it falls back to Supabase's sender.
 
 ---
 
@@ -343,5 +344,5 @@ The API asks Supabase to generate the one-time code without sending it, then sen
 [ ] pnpm deploy:policy --execute                  (agents)
 [ ] STEALTH_ROUTE_SEED, ZCASH_SEED, ZCASH_BIRTHDAY (stealth), Railway volume at /data
 [ ] pnpm token:create --execute; vault:set-fees --vexa-mint ($VEXA)
-[ ] Resend domain verified, RESEND_API_KEY set (sign-in email)
+[ ] Postmark domain verified and account approved, POSTMARK_SERVER_TOKEN set (sign-in email)
 ```
