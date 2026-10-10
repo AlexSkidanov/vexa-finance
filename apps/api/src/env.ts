@@ -66,11 +66,9 @@ const EnvSchema = z.object({
   ZINGO_CLI_PATH: z.string().default('zingo-cli'),
   ZINGO_NYM_PROXY: z.string().optional(),
 
-  // Email. Sign-in codes go through SMTP_URL if set, else Postmark. Without
-  // either, Supabase's built-in sender is used, which only reaches project
-  // members and is rate-limited.
-  POSTMARK_SERVER_TOKEN: z.string().optional(),
-  /** smtps://user:password@host:465. When set, it is used instead of Postmark. */
+  // Email. Sign-in codes go out over SMTP_URL. Without it, Supabase's built-in
+  // sender is used, which only reaches project members and is rate-limited.
+  /** smtps://user:password@host:465, e.g. Fastmail with an app password. */
   SMTP_URL: z
     .string()
     .regex(/^smtps?:\/\//, 'must be an smtp:// or smtps:// URL')

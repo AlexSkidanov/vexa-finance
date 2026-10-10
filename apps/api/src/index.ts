@@ -8,7 +8,7 @@ import { createApp } from './app.js';
 import { loadEnv } from './env.js';
 import { createLogger } from './logger.js';
 import { createSupabaseAuthProvider } from './lib/auth-provider.js';
-import { createPostmarkMailer, createSmtpMailer } from './lib/mailer.js';
+import { createSmtpMailer } from './lib/mailer.js';
 import { createSupabaseTokenVerifier } from './lib/tokens.js';
 import { createPostgresStore } from './store/postgres.js';
 import { createRpcChain } from './chain/chain.js';
@@ -93,9 +93,7 @@ const app = createApp({
     serviceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
     mailer: env.SMTP_URL
       ? createSmtpMailer({ url: env.SMTP_URL, from: env.EMAIL_FROM })
-      : env.POSTMARK_SERVER_TOKEN
-        ? createPostmarkMailer({ serverToken: env.POSTMARK_SERVER_TOKEN, from: env.EMAIL_FROM })
-        : undefined,
+      : undefined,
   }),
   tokens: createSupabaseTokenVerifier({
     supabaseUrl: env.SUPABASE_URL,

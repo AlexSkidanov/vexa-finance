@@ -93,7 +93,7 @@ describe('authentication', () => {
     const { request } = testApp({
       auth: fakeAuthProvider({
         sendEmailOtp: async () => {
-          throw new MailDeliveryError('postmark 422: account pending approval');
+          throw new MailDeliveryError('smtp: 550 sender not allowed');
         },
       }),
     });
