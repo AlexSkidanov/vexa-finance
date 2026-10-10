@@ -18,21 +18,60 @@ use crate::{
     instruction::parse_amount,
     stake::{Stake, STAKE_LEN, STAKE_LOCK_SECONDS, STAKE_SEED},
     state::Config,
-    token::{self, ASSOCIATED_TOKEN_PROGRAM_ID, SYSTEM_PROGRAM_ID, TOKEN_PROGRAM_ID},
+    token::{
+        self, ASSOCIATED_TOKEN_PROGRAM_ID, EXT_CONFIDENTIAL_TRANSFER_FEE_CONFIG,
+        EXT_DEFAULT_ACCOUNT_STATE, EXT_NON_TRANSFERABLE, EXT_PAUSABLE, EXT_PERMANENT_DELEGATE,
+        EXT_TRANSFER_FEE_CONFIG, EXT_TRANSFER_HOOK, SYSTEM_PROGRAM_ID, TOKEN_2022_PROGRAM_ID,
+        TOKEN_PROGRAM_ID,
+    },
     ID,
 };
 
-/// The configured $VEXA mint; staking is closed until the fee schedule names one.
-fn vexa_mint(fees: &AccountView, mint: &AccountView) -> Result<Address, ProgramError> {
+/// The token program that owns a $VEXA mint: the classic Token program or
+/// Token-2022. Every $VEXA account and transfer goes through the same one.
+fn mint_program(mint: &AccountView) -> Result<Address, ProgramError> {
+    if mint.owned_by(&TOKEN_PROGRAM_ID) {
+        Ok(TOKEN_PROGRAM_ID)
+    } else if mint.owned_by(&TOKEN_2022_PROGRAM_ID) {
+        Ok(TOKEN_2022_PROGRAM_ID)
+    } else {
+        Err(ProgramError::InvalidAccountOwner)
+    }
+}
+
+/// Token-2022 extensions staking refuses: transfer fees would leave the vault
+/// short of what it records, hooks need accounts it doesn't pass, a permanent
+/// delegate could move staked tokens, and non-transferable, pausable or
+/// frozen-by-default tokens could be locked in.
+const UNSUPPORTED_MINT_EXTENSIONS: [u16; 7] = [
+    EXT_TRANSFER_FEE_CONFIG,
+    EXT_DEFAULT_ACCOUNT_STATE,
+    EXT_NON_TRANSFERABLE,
+    EXT_PERMANENT_DELEGATE,
+    EXT_TRANSFER_HOOK,
+    EXT_CONFIDENTIAL_TRANSFER_FEE_CONFIG,
+    EXT_PAUSABLE,
+];
+
+/// The configured $VEXA mint and its token program; staking is closed until
+/// the fee schedule names one.
+fn vexa_mint(fees: &AccountView, mint: &AccountView) -> Result<(Address, Address), ProgramError> {
     let vexa = FeeSchedule::load(fees)?.vexa_mint();
     if vexa == Address::default() {
         return Err(VaultError::VexaNotSet.into());
     }
     require_config_match(mint, &vexa)?;
-    if !mint.owned_by(&TOKEN_PROGRAM_ID) {
-        return Err(ProgramError::InvalidAccountOwner);
+    let program = mint_program(mint)?;
+    if program == TOKEN_2022_PROGRAM_ID {
+        let data = mint.try_borrow()?;
+        for ext in token::extensions(&data, true)? {
+            let (ty, _) = ext?;
+            if UNSUPPORTED_MINT_EXTENSIONS.contains(&ty) {
+                return Err(VaultError::UnsupportedMintExtension.into());
+            }
+        }
     }
-    Ok(vexa)
+    Ok((vexa, program))
 }
 
 /// `Stake`: moves $VEXA from the owner's wallet into the stake vault and
@@ -47,7 +86,7 @@ fn vexa_mint(fees: &AccountView, mint: &AccountView) -> Result<Address, ProgramE
 ///   5. `[writable]`         owner's $VEXA account
 ///   6. `[writable]`         stake vault: the config PDA's associated $VEXA account
 ///   7. `[writable]`         stake record PDA `["stake", owner]`
-///   8. `[]`                 Token program
+///   8. `[]`                 Token program that owns the $VEXA mint (Token or Token-2022)
 ///   9. `[]`                 Associated Token program
 ///  10. `[]`                 System program
 ///
@@ -65,12 +104,12 @@ pub fn stake(accounts: &mut [AccountView], args: &[u8]) -> ProgramResult {
     require_signer(owner)?;
     require_signer(payer)?;
     require_writable(record)?;
-    require_program(token_program, &TOKEN_PROGRAM_ID)?;
     require_program(ata_program, &ASSOCIATED_TOKEN_PROGRAM_ID)?;
     require_program(system_program, &SYSTEM_PROGRAM_ID)?;
     Config::load(config)?;
-    let vexa = vexa_mint(fees, mint)?;
-    require_token_account(owner_vexa, &TOKEN_PROGRAM_ID, &vexa, Some(owner.address()))?;
+    let (vexa, program) = vexa_mint(fees, mint)?;
+    require_program(token_program, &program)?;
+    require_token_account(owner_vexa, &program, &vexa, Some(owner.address()))?;
 
     // The ATA program checks the vault's address, and creates it the first time.
     token::create_associated_token_account_idempotent(
@@ -107,16 +146,7 @@ pub fn stake(accounts: &mut [AccountView], args: &[u8]) -> ProgramResult {
     }
 
     let decimals = token::read_mint(&mint.try_borrow()?)?.decimals;
-    token::transfer_checked(
-        &TOKEN_PROGRAM_ID,
-        owner_vexa,
-        mint,
-        stake_vault,
-        owner,
-        amount,
-        decimals,
-        &[],
-    )?;
+    token::transfer_checked(&program, owner_vexa, mint, stake_vault, owner, amount, decimals, &[])?;
 
     let now = Clock::get()?.unix_timestamp;
     position
@@ -134,7 +164,7 @@ pub fn stake(accounts: &mut [AccountView], args: &[u8]) -> ProgramResult {
 ///   3. `[writable]` stake vault
 ///   4. `[writable]` stake record
 ///   5. `[writable]` owner's $VEXA account
-///   6. `[]`         Token program
+///   6. `[]`         Token program that owns the $VEXA mint (Token or Token-2022)
 ///
 /// Data: `amount: u64`.
 pub fn unstake(accounts: &mut [AccountView], args: &[u8]) -> ProgramResult {
@@ -147,7 +177,6 @@ pub fn unstake(accounts: &mut [AccountView], args: &[u8]) -> ProgramResult {
     }
     require_signer(owner)?;
     require_writable(record)?;
-    require_program(token_program, &TOKEN_PROGRAM_ID)?;
     let cfg = Config::load(config)?;
     let mut position = Stake::load(record)?;
     if position.owner() != *owner.address() {
@@ -155,9 +184,12 @@ pub fn unstake(accounts: &mut [AccountView], args: &[u8]) -> ProgramResult {
     }
     let vexa = position.vexa_mint();
     require_config_match(mint, &vexa)?;
-    require_token_account(owner_vexa, &TOKEN_PROGRAM_ID, &vexa, Some(owner.address()))?;
+    // Unstaking never checks extensions: a position can always be withdrawn.
+    let program = mint_program(mint)?;
+    require_program(token_program, &program)?;
+    require_token_account(owner_vexa, &program, &vexa, Some(owner.address()))?;
     // The vault is the config PDA's own $VEXA account: its owner field says so.
-    require_token_account(stake_vault, &TOKEN_PROGRAM_ID, &vexa, Some(config.address()))?;
+    require_token_account(stake_vault, &program, &vexa, Some(config.address()))?;
 
     if Clock::get()?.unix_timestamp < position.unlock_at() {
         return Err(VaultError::StakeLocked.into());
@@ -168,7 +200,7 @@ pub fn unstake(accounts: &mut [AccountView], args: &[u8]) -> ProgramResult {
     let bump = [cfg.bump];
     let seeds = config_seeds(&bump);
     token::transfer_checked(
-        &TOKEN_PROGRAM_ID,
+        &program,
         stake_vault,
         mint,
         owner_vexa,

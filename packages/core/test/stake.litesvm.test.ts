@@ -120,3 +120,43 @@ describe.skipIf(!vaultBinaryExists())('$VEXA staking on LiteSVM', { timeout: 30_
     ).rejects.toThrow();
   });
 });
+
+describe('stake plans for a Token-2022 $VEXA', () => {
+  it('derive accounts under the mint’s own token program', async () => {
+    const { address, generateKeyPairSigner } = await import('@solana/kit');
+    const { findAta, TOKEN_2022_PROGRAM } = await import('../src/solana/index.js');
+    const owner = await generateKeyPairSigner();
+    const vault = {
+      program: address('3g2JPX4roASUJVacf68sBSpARk5m9B3hu9xeaE6mTjPR'),
+      config: address('7Q3LNA4P3J7H4zNdHJEephe2XEvBPKPUJsqGifexRopw'),
+      usdcMint: address('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'),
+      cusdcMint: address('4STXpFN2mQSt12XG4os7ftLXHbBq5PVWYCAahToRt6QQ'),
+      usdcReserve: address('8eeishQYvtHwwM8QRN9629zzU9hBn18dGFW5T75ytqz6'),
+      fees: address('4PAtQdQRVfozc2F8x4eJF1oHhAQ6EMfX5EqBgPGnj29u'),
+      treasury: address('713NQALYzFN2zVSJ1ERqhSFiQTMqVnFyCVybYdn3r9Gj'),
+    };
+    const vexaMint = address('71ur38S2zxj1DaA2Untd8VYmAEkvyeXWkw3gycPDpump');
+    const plan = await stakePlan({
+      vault,
+      feePayer: owner.address,
+      owner,
+      vexaMint,
+      amount: 5n,
+      tokenProgram: TOKEN_2022_PROGRAM,
+    });
+    const ix = plan.stages[0]![0]!.instructions[0]!;
+    const accounts = ix.accounts!.map((a) => a.address);
+    expect(accounts[5]).toBe(await findAta(owner.address, vexaMint, TOKEN_2022_PROGRAM));
+    expect(accounts[6]).toBe(await findAta(vault.config, vexaMint, TOKEN_2022_PROGRAM));
+    expect(accounts[8]).toBe(TOKEN_2022_PROGRAM);
+
+    const out = await unstakePlan({
+      vault,
+      owner,
+      vexaMint,
+      amount: 5n,
+      tokenProgram: TOKEN_2022_PROGRAM,
+    });
+    expect(out.stages[0]![0]!.instructions[0]!.accounts!.at(-1)!.address).toBe(TOKEN_2022_PROGRAM);
+  });
+});

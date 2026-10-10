@@ -51,6 +51,8 @@ pub enum VaultError {
     InsufficientStake = 21,
     /// A proof context doesn't hold the proof it was required to.
     ContextMismatch = 22,
+    /// The $VEXA mint has a Token-2022 extension staking can't hold safely.
+    UnsupportedMintExtension = 23,
 }
 
 impl From<VaultError> for ProgramError {

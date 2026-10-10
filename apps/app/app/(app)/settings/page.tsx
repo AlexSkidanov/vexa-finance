@@ -37,6 +37,7 @@ export default function Settings() {
             { href: '/withdraw/', label: 'Withdraw', icon: Icon.withdraw },
             { href: '/privacy/', label: 'Privacy and view keys', icon: Icon.privacy },
             { href: '/vexa/', label: '$VEXA', icon: Icon.token },
+            { href: '/cards/', label: 'Cards · coming soon', icon: Icon.card },
           ].map(({ href, label, icon: Ic }) => (
             <Link
               key={href}

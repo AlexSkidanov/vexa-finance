@@ -224,6 +224,8 @@ export const ChainContext = z.object({
       feeCap: z.string(),
       treasury: z.string(),
       vexaMint: z.string().nullable(),
+      /** The token program that owns the $VEXA mint; absent from older APIs (classic Token). */
+      vexaTokenProgram: z.string().nullable().optional(),
       tiers: z.array(z.object({ minBalance: z.string(), discountBps: z.number().int() })),
     })
     .nullable(),

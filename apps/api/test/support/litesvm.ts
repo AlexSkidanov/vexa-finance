@@ -9,6 +9,9 @@ export function litesvmChain(bed: Testbed): Chain {
     async getAccountData(a) {
       return bed.account(a);
     },
+    async getAccountOwner(a) {
+      return bed.accountOwner(a);
+    },
     async getRentTable() {
       return bed.rent;
     },

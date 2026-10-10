@@ -203,6 +203,7 @@ export const money = new Hono<AppBindings>()
       chain.getAccountData(vault.cusdcMint),
       feeSchedule(c),
     ]);
+    const vexaTokenProgram = fees?.vexaMint ? await chain.getAccountOwner(fees.vexaMint) : null;
     const auditor = mint ? decodeConfidentialMint(mint)?.auditorElgamalPubkey : null;
     return c.json({
       cluster: env.SOLANA_CLUSTER,
@@ -220,6 +221,7 @@ export const money = new Hono<AppBindings>()
         feeCap: fees.feeCap.toString(),
         treasury: fees.treasury,
         vexaMint: fees.vexaMint,
+        vexaTokenProgram,
         tiers: fees.tiers.map((t) => ({
           minBalance: t.minBalance.toString(),
           discountBps: t.discountBps,

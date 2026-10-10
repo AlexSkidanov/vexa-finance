@@ -4076,7 +4076,7 @@ dependencies = [
 
 [[package]]
 name = "vexa-vault"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "bytemuck",
  "litesvm",

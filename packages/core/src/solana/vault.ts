@@ -201,6 +201,8 @@ export function stakeInstruction(input: {
   stakeVault: Address;
   stakeRecord: Address;
   amount: bigint;
+  /** The token program that owns the $VEXA mint; classic Token unless given. */
+  tokenProgram?: Address;
 }): Instruction {
   return {
     programAddress: input.vault.program ?? VAULT_PROGRAM,
@@ -213,7 +215,7 @@ export function stakeInstruction(input: {
       rw(input.ownerVexa),
       rw(input.stakeVault),
       rw(input.stakeRecord),
-      ro(TOKEN_PROGRAM),
+      ro(input.tokenProgram ?? TOKEN_PROGRAM),
       ro(ASSOCIATED_TOKEN_PROGRAM),
       ro(SYSTEM_PROGRAM),
     ],
@@ -230,6 +232,8 @@ export function unstakeInstruction(input: {
   stakeVault: Address;
   stakeRecord: Address;
   amount: bigint;
+  /** The token program that owns the $VEXA mint; classic Token unless given. */
+  tokenProgram?: Address;
 }): Instruction {
   return {
     programAddress: input.vault.program ?? VAULT_PROGRAM,
@@ -240,7 +244,7 @@ export function unstakeInstruction(input: {
       rw(input.stakeVault),
       rw(input.stakeRecord),
       rw(input.ownerVexa),
-      ro(TOKEN_PROGRAM),
+      ro(input.tokenProgram ?? TOKEN_PROGRAM),
     ],
     data: new Uint8Array([VaultInstruction.Unstake, ...u64(input.amount)]),
   } as Instruction;

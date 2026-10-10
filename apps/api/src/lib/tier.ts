@@ -41,8 +41,11 @@ export async function readVexaPosition(
   fees: FeeSchedule | null,
 ): Promise<VexaPosition | null> {
   if (!fees?.vexaMint) return null;
+  // $VEXA may be a classic Token or a Token-2022 mint (pump.fun launches the
+  // latter); the wallet's account is derived under whichever owns it.
+  const tokenProgram = (await deps.chain.getAccountOwner(fees.vexaMint)) ?? TOKEN_PROGRAM;
   const [walletAccount, stakeRecord] = await Promise.all([
-    findAta(wallet, fees.vexaMint, TOKEN_PROGRAM),
+    findAta(wallet, fees.vexaMint, tokenProgram),
     findStakeRecord(wallet, deps.vault.program),
   ]);
   const [walletData, stakeData] = await Promise.all([

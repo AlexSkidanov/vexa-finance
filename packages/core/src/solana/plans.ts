@@ -370,10 +370,15 @@ export async function transferPlan(input: TransferPlanInput): Promise<Plan> {
 // Stake / unstake: lock $VEXA in the vault for discounts and agent limits
 // ---------------------------------------------------------------------------
 
-async function stakeAccounts(vault: VaultAccounts, owner: Address, vexaMint: Address) {
+async function stakeAccounts(
+  vault: VaultAccounts,
+  owner: Address,
+  vexaMint: Address,
+  tokenProgram: Address,
+) {
   const [ownerVexa, stakeVault, stakeRecord] = await Promise.all([
-    findAta(owner, vexaMint, TOKEN_PROGRAM),
-    findAta(vault.config, vexaMint, TOKEN_PROGRAM),
+    findAta(owner, vexaMint, tokenProgram),
+    findAta(vault.config, vexaMint, tokenProgram),
     findStakeRecord(owner, vault.program ?? VAULT_PROGRAM),
   ]);
   return { ownerVexa, stakeVault, stakeRecord };
@@ -389,8 +394,16 @@ export async function stakePlan(input: {
   owner: TransactionSigner;
   vexaMint: Address;
   amount: bigint;
+  /** The token program that owns the $VEXA mint (Token or Token-2022); classic Token unless given. */
+  tokenProgram?: Address;
 }): Promise<Plan> {
-  const accounts = await stakeAccounts(input.vault, input.owner.address, input.vexaMint);
+  const tokenProgram = input.tokenProgram ?? TOKEN_PROGRAM;
+  const accounts = await stakeAccounts(
+    input.vault,
+    input.owner.address,
+    input.vexaMint,
+    tokenProgram,
+  );
   return {
     kind: 'stake',
     stages: [
@@ -404,6 +417,7 @@ export async function stakePlan(input: {
               payer: createNoopSigner(input.feePayer),
               vexaMint: input.vexaMint,
               amount: input.amount,
+              tokenProgram,
               ...accounts,
             }),
           ],
@@ -418,8 +432,16 @@ export async function unstakePlan(input: {
   owner: TransactionSigner;
   vexaMint: Address;
   amount: bigint;
+  /** The token program that owns the $VEXA mint (Token or Token-2022); classic Token unless given. */
+  tokenProgram?: Address;
 }): Promise<Plan> {
-  const accounts = await stakeAccounts(input.vault, input.owner.address, input.vexaMint);
+  const tokenProgram = input.tokenProgram ?? TOKEN_PROGRAM;
+  const accounts = await stakeAccounts(
+    input.vault,
+    input.owner.address,
+    input.vexaMint,
+    tokenProgram,
+  );
   return {
     kind: 'unstake',
     stages: [
@@ -432,6 +454,7 @@ export async function unstakePlan(input: {
               owner: input.owner,
               vexaMint: input.vexaMint,
               amount: input.amount,
+              tokenProgram,
               ...accounts,
             }),
           ],

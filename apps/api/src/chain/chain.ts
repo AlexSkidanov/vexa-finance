@@ -42,6 +42,8 @@ export interface LatestBlockhash {
 export interface Chain {
   feePayer: Address;
   getAccountData(address: Address): Promise<Uint8Array | null>;
+  /** The program that owns an account, or null if it doesn't exist. */
+  getAccountOwner(address: Address): Promise<Address | null>;
   getRentTable(): Promise<RentTable>;
   getMinimumBalance(space: bigint): Promise<bigint>;
   getLatestBlockhash(): Promise<LatestBlockhash>;
@@ -138,6 +140,17 @@ export async function createRpcChain(opts: {
         .getAccountInfo(address, { encoding: 'base64', commitment: 'confirmed' })
         .send();
       return value ? new Uint8Array(Buffer.from(value.data[0], 'base64')) : null;
+    },
+
+    async getAccountOwner(address) {
+      const { value } = await rpc
+        .getAccountInfo(address, {
+          encoding: 'base64',
+          dataSlice: { offset: 0, length: 0 },
+          commitment: 'confirmed',
+        })
+        .send();
+      return value ? value.owner : null;
     },
 
     async getMinimumBalance(space) {

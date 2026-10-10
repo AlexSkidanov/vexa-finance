@@ -19,6 +19,13 @@ function I({ children }: { children: ReactNode }) {
 }
 
 export const Icon = {
+  card: () => (
+    <I>
+      <rect x="3" y="6" width="18" height="12" rx="2" />
+      <path d="M3 10h18" />
+      <path d="M7 15h3" />
+    </I>
+  ),
   home: () => (
     <I>
       <path d="M4 10.5 12 4l8 6.5V20H4z" />

@@ -1,6 +1,6 @@
 [package]
 name = "vexa-vault"
-version = "0.5.0"
+version = "0.6.0"
 description = "Wraps USDC 1:1 into cUSDC, a Token-2022 mint with confidential transfers"
 edition.workspace = true
 rust-version.workspace = true
