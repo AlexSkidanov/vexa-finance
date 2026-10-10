@@ -105,6 +105,12 @@ function rentTable(ctx: ChainContext): RentTable {
   };
 }
 
+/** The token program that owns the $VEXA mint, as the API reports it. */
+function vexaTokenProgram(ctx: ChainContext): Address | undefined {
+  const program = ctx.feeSchedule?.vexaTokenProgram;
+  return program ? address(program) : undefined;
+}
+
 function feeSchedule(ctx: ChainContext): FeeSchedule {
   const s = ctx.feeSchedule;
   if (!s) throw new Error('the vault has no fee schedule yet, so it is not accepting money');
@@ -514,6 +520,7 @@ export class Money {
       owner: await createKeyPairSignerFromPrivateKeyBytes(keys.solanaSeed),
       vexaMint,
       amount,
+      tokenProgram: vexaTokenProgram(ctx),
     });
     return this.call('POST', '/v1/stake', {
       body: { plan: await this.compile(plan, ctx) },
@@ -531,6 +538,7 @@ export class Money {
       owner: await createKeyPairSignerFromPrivateKeyBytes(keys.solanaSeed),
       vexaMint,
       amount,
+      tokenProgram: vexaTokenProgram(ctx),
     });
     return this.call('POST', '/v1/unstake', {
       body: { plan: await this.compile(plan, ctx) },

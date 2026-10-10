@@ -95,6 +95,7 @@ export interface Testbed {
   rent: RentTable;
   blockhash(): { blockhash: ReturnType<LiteSVM['latestBlockhash']>; lastValidBlockHeight: bigint };
   account(address: Address): Uint8Array | null;
+  accountOwner(address: Address): Address | null;
   tokenAmount(address: Address): bigint;
   /** Signs with the fee payer and sends; what the API's chain does. */
   sendAsFeePayer(tx: Transaction): Promise<string>;
@@ -275,6 +276,10 @@ export async function createTestbed(): Promise<Testbed> {
     const a = svm.getAccount(addr);
     return a.exists ? new Uint8Array(a.data) : null;
   };
+  const accountOwner = (addr: Address) => {
+    const a = svm.getAccount(addr);
+    return a.exists ? a.programAddress : null;
+  };
 
   return {
     svm,
@@ -286,6 +291,7 @@ export async function createTestbed(): Promise<Testbed> {
     rent,
     blockhash,
     account,
+    accountOwner,
     tokenAmount: (addr) => {
       const data = account(addr);
       if (!data) throw new Error(`missing account ${addr}`);

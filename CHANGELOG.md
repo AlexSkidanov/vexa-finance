@@ -15,6 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Vault v0.3.0 (the protocol fee) upgraded in place, with the fee schedule set to 0.10% capped at
   5 USDC.
 
+### Added
+
+- **Token-2022 $VEXA** (vault v0.6.0): `Stake` and `Unstake` use whichever token program owns the
+  $VEXA mint, so a pump.fun (Token-2022) launch can be staked. `Stake` refuses Token-2022 mints with
+  transfer fees, transfer hooks, a permanent delegate, or non-transferable, pausable or
+  frozen-by-default tokens (`UnsupportedMintExtension`, code 23). The API reads the mint's program
+  for tiers and reports it as `feeSchedule.vexaTokenProgram`; the SDK passes it to stake plans.
+- **Post-quantum audit exports**: every export also carries an ML-DSA-65 signature in
+  `X-Vexa-Signature-ML-DSA-65`, verified by the audit portal and `@vexa/sdk`.
+- **App**: a "Get $VEXA into Vexa" panel on the $VEXA page, and a Cards page marked coming soon.
+
 ### Added (Phase 3)
 
 - **Agents**: sub-accounts whose Solana key is a NEAR MPC key (`v1.signer`), signed only through the
