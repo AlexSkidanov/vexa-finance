@@ -39,7 +39,7 @@ const FAQS: [string, string][] = [
   ],
   [
     'Is Vexa safe from quantum computers?',
-    "Not fully yet, and neither is any blockchain. NEAR, where agent limits are enforced, already supports post-quantum ML-DSA keys on mainnet, and Vexa's policy contract can move to them. Encrypted balances on Solana and the Zcash route depend on those networks upgrading. The Quantum readiness page shows the live status of each part.",
+    "Partly, and no blockchain is fully there yet. The contract that enforces agent limits, vexa-policy.near, has been controlled only by post-quantum ML-DSA-65 keys since 9 October 2026, live on NEAR mainnet. Encrypted balances on Solana and the Zcash route depend on those networks upgrading. The Quantum readiness page checks the contract's keys live and shows the status of every part.",
   ],
 ];
 

@@ -159,10 +159,10 @@ export default function Security() {
               Post-quantum on NEAR
             </div>
             <p style={{ font: '400 17px/1.45 var(--sans)', color: 'var(--body)', margin: 0 }}>
-              NEAR mainnet accepts ML-DSA-65 (NIST FIPS 204) keys, so the account that holds
-              Vexa&rsquo;s agent policy can move to post-quantum keys without changing its address.
-              Balances on Solana, agent wallets and stealth transfers depend on upstream work, and
-              we track each one in public.{' '}
+              Live since 9 October 2026: the account that holds Vexa&rsquo;s agent policy is
+              controlled only by ML-DSA-65 (NIST FIPS 204) keys on NEAR mainnet, and its Ed25519 key
+              is deleted. Balances on Solana, agent wallets and stealth transfers depend on upstream
+              work, and we track each one in public.{' '}
               <TLink href="/quantum/" className="inline-link">
                 See where every part stands.
               </TLink>

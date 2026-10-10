@@ -124,7 +124,8 @@ export default function Agents() {
         </p>
         <TierTable />
         <p data-reveal="1" className="body-18" style={{ margin: '24px 0 0', maxWidth: 680 }}>
-          The policy contract lives on NEAR, which supports post-quantum ML-DSA keys on mainnet.{' '}
+          The policy contract is controlled only by post-quantum ML-DSA-65 keys, live on NEAR
+          mainnet.{' '}
           <TLink href="/quantum/" className="inline-link">
             See quantum readiness.
           </TLink>

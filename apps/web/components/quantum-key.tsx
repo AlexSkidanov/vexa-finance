@@ -43,7 +43,7 @@ export function QuantumKey() {
               ? 'could not reach NEAR RPC'
               : keys.postQuantum
                 ? 'post-quantum: every full-access key is ML-DSA-65'
-                : 'not yet post-quantum: rotation to ML-DSA-65 planned'}
+                : 'not post-quantum: a full-access key uses an elliptic curve'}
         </span>
       </div>
       <p style={{ font: '400 16px/1.45 var(--sans)', color: 'var(--body)', margin: 0 }}>
