@@ -664,6 +664,62 @@ fn nobody_can_borrow_someone_elses_stake_for_a_discount() {
     assert!(err.contains(&code(VaultError::TokenOwnerMismatch)), "{err}");
 }
 
+#[test]
+fn token_2022_vexa_stakes_counts_and_unstakes() {
+    // pump.fun creates coins under Token-2022 with a metadata pointer.
+    let mut env = setup();
+    let mint = env.launch_vexa_2022(false);
+    assert_eq!(env.token_program_of(&mint), spl_token_2022_interface::id());
+    let admin = env.admin.insecure_clone();
+    let alice = env.user(1_000);
+    let wallet = env.give_vexa(&mint, &alice, 20_000 * USDC);
+
+    // A Token-2022 wallet balance counts at half: 20k weighs 10k, 25% off.
+    let ix = env.deposit_ix_with(&alice, 100 * USDC, Some(wallet));
+    env.send(&[ix], &alice.kp, &[]).unwrap();
+    assert_eq!(env.usdc_balance(&env.treasury), 75_000);
+
+    let ix = env.stake_ix(&mint, &alice, &admin.pubkey(), 20_000 * USDC);
+    env.send(&[ix], &admin, &[&alice.kp]).unwrap();
+    assert_eq!(env.staked(&alice.kp.pubkey()), 20_000 * USDC);
+    assert_eq!(env.usdc_balance(&env.stake_vault(&mint)), 20_000 * USDC);
+
+    // The stake record alone now weighs 20k: still the 10k tier.
+    let ix = env.deposit_ix_with(&alice, 100 * USDC, Some(stake_pda(&alice.kp.pubkey())));
+    env.send(&[ix], &alice.kp, &[]).unwrap();
+    assert_eq!(env.usdc_balance(&env.treasury), 150_000);
+
+    env.warp(vault::stake::STAKE_LOCK_SECONDS);
+    env.send(&[env.unstake_ix(&mint, &alice, 20_000 * USDC)], &alice.kp, &[]).unwrap();
+    assert_eq!(env.staked(&alice.kp.pubkey()), 0);
+    assert_eq!(env.usdc_balance(&wallet), 20_000 * USDC);
+}
+
+#[test]
+fn staking_refuses_a_token_2022_mint_with_a_transfer_fee() {
+    // A fee would leave the vault holding less than the stake records.
+    let mut env = setup();
+    let mint = env.launch_vexa_2022(true);
+    let admin = env.admin.insecure_clone();
+    let alice = env.user(1);
+    env.give_vexa(&mint, &alice, 1_000 * USDC);
+    let ix = env.stake_ix(&mint, &alice, &admin.pubkey(), 1_000 * USDC);
+    let err = env.send(&[ix], &admin, &[&alice.kp]).unwrap_err();
+    assert!(err.contains(&code(VaultError::UnsupportedMintExtension)), "{err}");
+}
+
+#[test]
+fn staking_uses_the_mints_own_token_program() {
+    let mut env = setup();
+    let mint = env.launch_vexa_2022(false);
+    let admin = env.admin.insecure_clone();
+    let alice = env.user(1);
+    env.give_vexa(&mint, &alice, 1_000 * USDC);
+    let mut ix = env.stake_ix(&mint, &alice, &admin.pubkey(), USDC);
+    ix.accounts[8].pubkey = spl_token_interface::id();
+    assert!(env.send(&[ix], &admin, &[&alice.kp]).is_err());
+}
+
 // ---------------------------------------------------------------------------
 // proof contexts (agent payments)
 // ---------------------------------------------------------------------------

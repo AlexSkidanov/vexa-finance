@@ -573,45 +573,124 @@ impl Env {
         mint
     }
 
+    /// Launches $VEXA as a Token-2022 mint, the way pump.fun creates coins
+    /// (a metadata pointer), optionally with a transfer fee to test refusals.
+    pub fn launch_vexa_2022(&mut self, transfer_fee: bool) -> Pubkey {
+        let admin = self.admin.insecure_clone();
+        let t22 = spl_token_2022_interface::id();
+        let mint = Keypair::new();
+        let mut extensions = vec![ExtensionType::MetadataPointer];
+        if transfer_fee {
+            extensions.push(ExtensionType::TransferFeeConfig);
+        }
+        let space = ExtensionType::try_calculate_account_len::<Mint2022>(&extensions).unwrap();
+        let mut ixs = vec![
+            system_instruction::create_account(
+                &admin.pubkey(),
+                &mint.pubkey(),
+                self.svm.minimum_balance_for_rent_exemption(space),
+                space as u64,
+                &t22,
+            ),
+            spl_token_2022_interface::extension::metadata_pointer::instruction::initialize(
+                &t22,
+                &mint.pubkey(),
+                Some(admin.pubkey()),
+                Some(mint.pubkey()),
+            )
+            .unwrap(),
+        ];
+        if transfer_fee {
+            ixs.push(
+                spl_token_2022_interface::extension::transfer_fee::instruction::initialize_transfer_fee_config(
+                    &t22,
+                    &mint.pubkey(),
+                    Some(&admin.pubkey()),
+                    Some(&admin.pubkey()),
+                    100,
+                    u64::MAX,
+                )
+                .unwrap(),
+            );
+        }
+        ixs.push(
+            spl_token_2022_interface::instruction::initialize_mint2(
+                &t22,
+                &mint.pubkey(),
+                &admin.pubkey(),
+                None,
+                DECIMALS,
+            )
+            .unwrap(),
+        );
+        send(&mut self.svm, &ixs, &admin, &[&mint]).unwrap();
+        let mint = mint.pubkey();
+        let tiers = [
+            (1_000 * USDC, 1_000),
+            (10_000 * USDC, 2_500),
+            (100_000 * USDC, 5_000),
+            (1_000_000 * USDC, 7_500),
+        ];
+        let ix = set_fees_ix(&admin.pubkey(), &self.treasury, 10, 5 * USDC, Some(mint), &tiers);
+        self.send(&[ix], &admin, &[]).unwrap();
+        mint
+    }
+
     /// Mints `amount` $VEXA to the user's wallet; returns their $VEXA account.
     pub fn give_vexa(&mut self, mint: &Pubkey, user: &User, amount: u64) -> Pubkey {
         let admin = self.admin.insecure_clone();
-        let ata = get_associated_token_address_with_program_id(
-            &user.kp.pubkey(),
-            mint,
-            &spl_token_interface::id(),
-        );
-        let ixs = [
-            spl_associated_token_account_interface::instruction::create_associated_token_account_idempotent(
-                &admin.pubkey(),
-                &user.kp.pubkey(),
-                mint,
-                &spl_token_interface::id(),
-            ),
-            spl_token_interface::instruction::mint_to(
-                &spl_token_interface::id(),
+        let program = self.token_program_of(mint);
+        let ata = get_associated_token_address_with_program_id(&user.kp.pubkey(), mint, &program);
+        let mint_to = if program == spl_token_2022_interface::id() {
+            spl_token_2022_interface::instruction::mint_to(
+                &program,
                 mint,
                 &ata,
                 &admin.pubkey(),
                 &[],
                 amount,
             )
-            .unwrap(),
+        } else {
+            spl_token_interface::instruction::mint_to(
+                &program,
+                mint,
+                &ata,
+                &admin.pubkey(),
+                &[],
+                amount,
+            )
+        }
+        .unwrap();
+        let ixs = [
+            spl_associated_token_account_interface::instruction::create_associated_token_account_idempotent(
+                &admin.pubkey(),
+                &user.kp.pubkey(),
+                mint,
+                &program,
+            ),
+            mint_to,
         ];
         self.send(&ixs, &admin, &[]).unwrap();
         ata
     }
 
+    /// The token program that owns a mint: classic Token or Token-2022.
+    pub fn token_program_of(&self, mint: &Pubkey) -> Pubkey {
+        self.svm.get_account(mint).unwrap().owner
+    }
+
     pub fn stake_vault(&self, mint: &Pubkey) -> Pubkey {
-        get_associated_token_address_with_program_id(&self.config, mint, &spl_token_interface::id())
+        get_associated_token_address_with_program_id(
+            &self.config,
+            mint,
+            &self.token_program_of(mint),
+        )
     }
 
     pub fn stake_ix(&self, mint: &Pubkey, user: &User, payer: &Pubkey, amount: u64) -> Instruction {
-        let owner_vexa = get_associated_token_address_with_program_id(
-            &user.kp.pubkey(),
-            mint,
-            &spl_token_interface::id(),
-        );
+        let program = self.token_program_of(mint);
+        let owner_vexa =
+            get_associated_token_address_with_program_id(&user.kp.pubkey(), mint, &program);
         vault_ix(
             vault::instruction::VaultInstruction::Stake,
             &amount.to_le_bytes(),
@@ -624,7 +703,7 @@ impl Env {
                 AccountMeta::new(owner_vexa, false),
                 AccountMeta::new(self.stake_vault(mint), false),
                 AccountMeta::new(stake_pda(&user.kp.pubkey()), false),
-                AccountMeta::new_readonly(spl_token_interface::id(), false),
+                AccountMeta::new_readonly(program, false),
                 AccountMeta::new_readonly(
                     spl_associated_token_account_interface::program::id(),
                     false,
@@ -635,11 +714,9 @@ impl Env {
     }
 
     pub fn unstake_ix(&self, mint: &Pubkey, user: &User, amount: u64) -> Instruction {
-        let owner_vexa = get_associated_token_address_with_program_id(
-            &user.kp.pubkey(),
-            mint,
-            &spl_token_interface::id(),
-        );
+        let program = self.token_program_of(mint);
+        let owner_vexa =
+            get_associated_token_address_with_program_id(&user.kp.pubkey(), mint, &program);
         vault_ix(
             vault::instruction::VaultInstruction::Unstake,
             &amount.to_le_bytes(),
@@ -650,7 +727,7 @@ impl Env {
                 AccountMeta::new(self.stake_vault(mint), false),
                 AccountMeta::new(stake_pda(&user.kp.pubkey()), false),
                 AccountMeta::new(owner_vexa, false),
-                AccountMeta::new_readonly(spl_token_interface::id(), false),
+                AccountMeta::new_readonly(program, false),
             ],
         )
     }

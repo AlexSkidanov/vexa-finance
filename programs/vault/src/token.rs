@@ -39,6 +39,13 @@ pub const MINT_LEN: usize = 82;
 pub const ACCOUNT_LEN: usize = 165;
 
 /// Token-2022 extension types (u16 in the TLV header).
+pub const EXT_TRANSFER_FEE_CONFIG: u16 = 1;
+pub const EXT_DEFAULT_ACCOUNT_STATE: u16 = 6;
+pub const EXT_NON_TRANSFERABLE: u16 = 9;
+pub const EXT_PERMANENT_DELEGATE: u16 = 12;
+pub const EXT_TRANSFER_HOOK: u16 = 14;
+pub const EXT_CONFIDENTIAL_TRANSFER_FEE_CONFIG: u16 = 16;
+pub const EXT_PAUSABLE: u16 = 26;
 pub const EXT_CONFIDENTIAL_TRANSFER_MINT: u16 = 4;
 pub const EXT_CONFIDENTIAL_TRANSFER_ACCOUNT: u16 = 5;
 
