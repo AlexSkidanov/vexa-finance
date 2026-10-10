@@ -1,6 +1,7 @@
 import { minCol, Stat, SubHero, TierTable } from '@/components/ui';
 import { pageMeta } from '@/lib/meta';
-import { APP_URL, CONTRACTS } from '@/lib/site';
+import { VexaMint } from '@/components/vexa-mint';
+import { APP_URL, CONTRACTS, VEXA_LINKS } from '@/lib/site';
 
 export const metadata = pageMeta(
   '$VEXA',
@@ -63,10 +64,7 @@ export default function Vexa() {
             delay={180}
           />
           <div data-reveal="1" data-delay="240" className="hcell">
-            <div className="num-label">Mint address</div>
-            <div style={{ font: '400 15px/1.5 var(--mono)', color: 'var(--ash)' }}>
-              Shown here once $VEXA is live.
-            </div>
+            <VexaMint />
           </div>
           <div data-reveal="1" data-delay="300" className="hcell">
             <div className="num-label">VEXA/NEAR pool</div>
@@ -109,13 +107,22 @@ export default function Vexa() {
           <a href={APP_URL} className="btn btn-primary">
             Stake in the app
           </a>
-          <span
+          <a
+            href={VEXA_LINKS.pumpfun}
+            target="_blank"
+            rel="noopener noreferrer"
             className="btn btn-secondary"
-            aria-disabled="true"
-            title="The token address is published here once $VEXA is live."
+          >
+            $VEXA on pump.fun
+          </a>
+          <a
+            href={VEXA_LINKS.solscan}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn btn-secondary"
           >
             Token on Solscan
-          </span>
+          </a>
         </div>
       </section>
     </>

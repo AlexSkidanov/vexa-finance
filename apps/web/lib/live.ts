@@ -115,3 +115,73 @@ export function getAccountKeys(accountId: string): Promise<AccountKeys | null> {
   keyLists.set(accountId, p);
   return p;
 }
+
+export interface MintInfo {
+  /** False until the token is created on-chain. */
+  exists: boolean;
+  /** 'spl' for the classic Token program, 'token-2022' for Token Extensions. */
+  program: 'spl' | 'token-2022' | 'other' | null;
+  decimals: number | null;
+  /** Base units, as a string. */
+  supply: string | null;
+  mintAuthorityRevoked: boolean | null;
+}
+
+const SOLANA_RPC_URL = 'https://solana-rpc.publicnode.com';
+const SPL_TOKEN = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+const TOKEN_2022 = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
+const mints = new Map<string, Promise<MintInfo | null>>();
+
+/** Reads a token mint straight from Solana mainnet, not from our API. */
+export function getMint(address: string): Promise<MintInfo | null> {
+  let p = mints.get(address);
+  if (p) return p;
+  p = fetch(SOLANA_RPC_URL, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 'vexa',
+      method: 'getAccountInfo',
+      params: [address, { encoding: 'jsonParsed', commitment: 'confirmed' }],
+    }),
+    cache: 'no-store',
+  })
+    .then(async (res) => {
+      if (!res.ok) return null;
+      const body = (await res.json()) as {
+        result?: {
+          value: null | {
+            owner: string;
+            data?: { parsed?: { info?: Record<string, unknown> } };
+          };
+        };
+      };
+      if (!body.result) return null;
+      const v = body.result.value;
+      if (!v) {
+        return {
+          exists: false,
+          program: null,
+          decimals: null,
+          supply: null,
+          mintAuthorityRevoked: null,
+        };
+      }
+      const info = v.data?.parsed?.info ?? {};
+      return {
+        exists: true,
+        program: v.owner === SPL_TOKEN ? 'spl' : v.owner === TOKEN_2022 ? 'token-2022' : 'other',
+        decimals: typeof info.decimals === 'number' ? info.decimals : null,
+        supply: typeof info.supply === 'string' ? info.supply : null,
+        mintAuthorityRevoked: info.mintAuthority == null,
+      } satisfies MintInfo;
+    })
+    .catch(() => null)
+    .then((v) => {
+      if (!v) mints.delete(address);
+      return v;
+    });
+  mints.set(address, p);
+  return p;
+}
