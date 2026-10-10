@@ -6,6 +6,9 @@ export const API_URL = (process.env.NEXT_PUBLIC_VEXA_API_URL ?? 'https://api.vex
 );
 
 export const SITE_URL = 'https://vexa.finance';
+
+/** $VEXA's contract address on Solana (launched on pump.fun). */
+export const VEXA_MINT = '71ur38S2zxj1DaA2Untd8VYmAEkvyeXWkw3gycPDpump';
 export const AUDIT_URL = `${SITE_URL}/audit/`;
 export const DOCS_URL = 'https://github.com/AlexSkidanov/vexa-finance/blob/main/docs/API.md';
 

@@ -6,16 +6,18 @@ import { useClient } from '@/components/session';
 import {
   AmountInput,
   amountState,
+  CopyButton,
   Loading,
   PageHead,
   ProblemNote,
+  Qr,
   Row,
   useAction,
   useLoad,
 } from '@/components/ui';
 import { amountToInput, formatAmount, formatBps, percentOf } from '@/lib/amount';
-import { formatDay, untilText } from '@/lib/format';
-import { SITE_URL } from '@/lib/config';
+import { formatDay, solscanAccount, untilText } from '@/lib/format';
+import { SITE_URL, VEXA_MINT } from '@/lib/config';
 
 export default function Vexa() {
   const client = useClient();
@@ -106,6 +108,8 @@ export default function Vexa() {
           />
         </section>
       )}
+
+      <GetVexa address={client.address()} />
 
       <section className="section">
         <h2 className="section-title" style={{ marginBottom: 14 }}>
@@ -240,5 +244,44 @@ function StakeForms({
         {act.busy ? 'Confirming…' : mode === 'stake' ? 'Stake' : 'Unstake'}
       </button>
     </div>
+  );
+}
+
+/** Where to send $VEXA from another wallet: this account's Solana address. */
+function GetVexa({ address }: { address: string }) {
+  return (
+    <section className="section panel-flat stack" aria-labelledby="get-vexa">
+      <h2 id="get-vexa" className="section-title" style={{ margin: 0 }}>
+        Get $VEXA into Vexa
+      </h2>
+      <p className="help" style={{ margin: 0 }}>
+        Send $VEXA from Phantom, Backpack or any Solana wallet to your Vexa address below. It shows
+        up under In wallet and counts at half weight; stake it to count in full.
+      </p>
+      <div className="row" style={{ alignItems: 'flex-start', gap: 20 }}>
+        <Qr value={address} label="QR code of your Vexa address" />
+        <div className="stack-sm min0" style={{ flex: '1 1 240px' }}>
+          <span className="address">{address}</span>
+          <div className="row">
+            <CopyButton value={address} label="Copy address" />
+            <a
+              href={solscanAccount(address)}
+              className="tlink"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              View on Solscan
+            </a>
+          </div>
+        </div>
+      </div>
+      <p className="notice warn" style={{ margin: 0 }}>
+        <strong>$VEXA on Solana only.</strong> Check the token is{' '}
+        <span className="address" style={{ display: 'inline' }}>
+          {VEXA_MINT}
+        </span>{' '}
+        before you send. Tokens from other networks can’t be recovered.
+      </p>
+    </section>
   );
 }

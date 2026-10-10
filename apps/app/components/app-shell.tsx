@@ -17,6 +17,7 @@ const NAV = [
   { href: '/agents/', label: 'Agents', icon: Icon.agents },
   { href: '/privacy/', label: 'Privacy', icon: Icon.privacy },
   { href: '/vexa/', label: '$VEXA', icon: Icon.token },
+  { href: '/cards/', label: 'Cards', icon: Icon.card },
   { href: '/settings/', label: 'Settings', icon: Icon.settings },
 ];
 
@@ -25,7 +26,7 @@ const TABS = [
   { href: '/send/', label: 'Send', icon: Icon.send },
   { href: '/activity/', label: 'Activity', icon: Icon.activity },
   { href: '/agents/', label: 'Agents', icon: Icon.agents },
-  { href: '/settings/', label: 'More', icon: Icon.more, also: ['/privacy/', '/vexa/'] },
+  { href: '/settings/', label: 'More', icon: Icon.more, also: ['/privacy/', '/vexa/', '/cards/'] },
 ];
 
 const current = (pathname: string, href: string, also: string[] = []) =>
