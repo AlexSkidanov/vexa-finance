@@ -1,5 +1,6 @@
 /**
- * pnpm upgrade:vault --authority <keypair file> [--payer <keypair file>] [--execute] [--env path]
+ * pnpm upgrade:vault --authority <keypair file> [--payer <keypair file>] [--priority <µlamports>]
+ *                   [--close <buffer address>] [--execute] [--env path]
  *
  * Upgrades the deployed vault to target/deploy/vault.so (`pnpm build:vault`
  * first). The upgrade authority signs; the payer (the authority unless given)
@@ -13,6 +14,12 @@
  * Uses the Solana CLI (`solana program deploy`), which uploads, extends and
  * upgrades. Afterwards the on-chain bytecode is hashed and compared with the
  * local binary. Without --execute it prints the exact SOL required.
+ *
+ * Mainnet drops unprioritised transactions when it's busy, so every write
+ * carries a priority fee (--priority, in micro-lamports per compute unit) and
+ * the CLI re-signs with a fresh blockhash up to 50 times. A failed attempt
+ * prints the address of the buffer it left; pass it as --close and it's closed
+ * first, its rent returned to the payer.
  */
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -30,6 +37,10 @@ const PROGRAM_DATA_HEADER = 45;
 const BUFFER_HEADER = 37;
 /** The loader refuses smaller extensions, short of reaching the maximum size. */
 const MIN_EXTENSION = 10_240;
+/** Default priority fee, micro-lamports per compute unit. */
+const DEFAULT_PRIORITY = 50_000;
+/** The most compute a single deploy transaction is budgeted, for the worst-case fee. */
+const MAX_CU_PER_TX = 200_000;
 
 const expand = (p: string) => (p.startsWith('~/') ? join(homedir(), p.slice(2)) : p);
 const sha256 = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
@@ -66,9 +77,22 @@ async function main() {
   const rent = async (n: number) => rpc.getMinimumBalanceForRentExemption(BigInt(n)).send();
   const buffer = await rent(BUFFER_HEADER + binary.length);
   const extension = growth ? (await rent(data.length + growth)) - BigInt(info.lamports) : 0n;
+  const priority = Number(arg('priority') ?? DEFAULT_PRIORITY);
+  if (!Number.isInteger(priority) || priority < 0)
+    throw new Error('--priority must be a whole number');
   const writes = Math.ceil(binary.length / 1000);
-  const fees = BigInt((writes + 4) * 5_000);
+  const txs = writes + 4;
+  // Base fees, plus the most the priority fee can add if every transaction
+  // used its whole compute budget. Writes use far less, so this over-reserves.
+  const fees = BigInt(txs * 5_000) + BigInt(Math.ceil((txs * MAX_CU_PER_TX * priority) / 1e6));
   const needed = buffer + extension + fees;
+  const stale = arg('close') ? address(arg('close')!) : null;
+  const staleInfo = stale
+    ? (await rpc.getAccountInfo(stale, { encoding: 'base64' }).send()).value
+    : null;
+  if (stale && (!staleInfo || staleInfo.owner !== LOADER))
+    throw new Error(`${stale} is not an upload buffer (already closed?)`);
+  const staleLamports = staleInfo ? BigInt(staleInfo.lamports) : 0n;
   const balance = (await rpc.getBalance(payer.address).send()).value;
   const deployed = data.subarray(PROGRAM_DATA_HEADER, PROGRAM_DATA_HEADER + binary.length);
 
@@ -76,13 +100,20 @@ async function main() {
   console.log(`  program            ${program}`);
   console.log(`  upgrade authority  ${authority.address}`);
   console.log(`  payer              ${payer.address} (holds ${sol(balance)} SOL)`);
+  if (stale) {
+    console.log(
+      `  leftover buffer    ${stale}, ${sol(staleLamports)} SOL (closed and refunded first)`,
+    );
+  }
   console.log(
     `  binary             ${binary.length} bytes, sha256 ${sha256(binary).slice(0, 16)}…`,
   );
   console.log(`  deployed           ${capacity} bytes capacity\n`);
   console.log(`  buffer rent        ${sol(buffer)} SOL  (refunded when the upgrade lands)`);
   console.log(`  extension rent     ${sol(extension)} SOL  (permanent, +${growth} bytes)`);
-  console.log(`  transaction fees   ${sol(fees)} SOL  (${writes} writes)`);
+  console.log(
+    `  transaction fees   ${sol(fees)} SOL at most  (${writes} writes, priority ${priority} µlamports/CU)`,
+  );
   console.log(`  needed up front    ${sol(needed)} SOL`);
   console.log(`  net cost           ${sol(extension + fees)} SOL\n`);
 
@@ -91,12 +122,26 @@ async function main() {
     return;
   }
   if (!execute) return console.log('Dry run. Re-run with --execute to upgrade.\n');
-  if (balance < needed) throw new Error(`the payer needs ${sol(needed - balance)} more SOL`);
+  const available = balance + (payer.address === authority.address ? staleLamports : 0n);
+  if (available < needed) throw new Error(`the payer needs ${sol(needed - available)} more SOL`);
 
   const cli = (args: string[]) =>
     execFileSync('solana', [...args, '--url', rpcUrl, '--commitment', 'confirmed'], {
       stdio: 'inherit',
     });
+  if (stale) {
+    cli([
+      'program',
+      'close',
+      stale,
+      '--authority',
+      expand(authorityPath),
+      '--recipient',
+      payer.address,
+      '--keypair',
+      expand(payerPath),
+    ]);
+  }
   // Extend explicitly: the CLI's automatic extension budgets more than it
   // spends and refuses to start when the payer holds exactly what's needed.
   if (growth) {
@@ -123,6 +168,10 @@ async function main() {
     expand(payerPath),
     '--no-auto-extend',
     '--use-rpc',
+    '--with-compute-unit-price',
+    String(priority),
+    '--max-sign-attempts',
+    '50',
   ]);
 
   // The RPC can serve the old code for a few seconds after the upgrade lands.
