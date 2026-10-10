@@ -10,6 +10,14 @@ export interface Email {
   text: string;
 }
 
+/**
+ * The provider refused or failed to take the message. It says nothing about
+ * the recipient's account, so callers can report it to the user.
+ */
+export class MailDeliveryError extends Error {
+  override name = 'MailDeliveryError';
+}
+
 export interface Mailer {
   send(email: Email): Promise<void>;
 }
@@ -46,7 +54,7 @@ export function createPostmarkMailer(opts: {
         // Postmark's error body names the problem (unconfirmed sender, bad
         // token) and never echoes the message, so it's safe to log.
         const detail = await res.text().catch(() => '');
-        throw new Error(`postmark ${res.status}: ${detail.slice(0, 300)}`);
+        throw new MailDeliveryError(`postmark ${res.status}: ${detail.slice(0, 300)}`);
       }
     },
   };

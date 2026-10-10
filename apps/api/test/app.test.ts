@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { generateApiKey } from '@vexa/core';
+import { MailDeliveryError } from '../src/lib/mailer.js';
 import { createLogger } from '../src/logger.js';
 import { fakeAuthProvider, sessionToken, signedClaim, testApp } from './helpers.js';
 
@@ -86,6 +87,21 @@ describe('authentication', () => {
     expect(ok.status).toBe(202);
     expect(bad.status).toBe(202);
     expect(await ok.json()).toEqual(await bad.json());
+  });
+
+  it('tells the user when the mail provider refuses the code email', async () => {
+    const { request } = testApp({
+      auth: fakeAuthProvider({
+        sendEmailOtp: async () => {
+          throw new MailDeliveryError('postmark 422: account pending approval');
+        },
+      }),
+    });
+    const res = await request('POST', '/v1/auth/otp', { body: { email: 'a@b.co' } });
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({
+      error: { code: 'upstream_unavailable', message: expect.stringContaining("couldn't send") },
+    });
   });
 
   it('exchanges a correct OTP for a session', async () => {

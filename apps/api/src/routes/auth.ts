@@ -21,6 +21,7 @@ import { ApiError } from '../errors.js';
 import type { AppBindings } from '../context.js';
 import { authenticate, principalOf } from '../middleware/auth.js';
 import { clientIp, rateLimit } from '../lib/rate-limit.js';
+import { MailDeliveryError } from '../lib/mailer.js';
 import { parseBody } from '../lib/validate.js';
 
 /**
@@ -49,9 +50,18 @@ export const auth = new Hono<AppBindings>()
     try {
       await c.get('deps').auth.sendEmailOtp(email);
     } catch (err) {
-      // Log the reason, but answer the same way either way, so this endpoint
-      // can't be used to probe which addresses have accounts.
       c.get('logger').warn({ err }, 'otp send failed');
+      // A refused send says nothing about the address, so tell the user rather
+      // than leave them waiting for an email that isn't coming.
+      if (err instanceof MailDeliveryError) {
+        throw new ApiError(
+          503,
+          ErrorCode.UpstreamUnavailable,
+          "We couldn't send the email right now. Try again in a few minutes.",
+        );
+      }
+      // Anything else answers the same way as success, so this endpoint can't
+      // be used to probe which addresses have accounts.
     }
     return c.json({ sent: true }, 202);
   })
