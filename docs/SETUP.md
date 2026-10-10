@@ -74,7 +74,7 @@ The RP ID must be the origin's hostname or a parent of it. Passkeys registered u
 6. Auth settings (no env values, but needed for Phase 1):
    - **Authentication** → **Sign In / Providers** → **Email**: enabled. Turn **Confirm email** on.
    - **Authentication** → **Emails** → **Templates** → **Magic Link**: only used as the fallback sender (section 14). If you rely on it, replace the body with a code-based template containing `{{ .Token }}` so users get a code instead of a link. The code length is set under **Authentication → Providers → Email → Email OTP Length**; the app and API accept 6 to 10 digits.
-   - **Authentication** → **Emails**: nothing to change. The API sends sign-in codes itself through Postmark (section 14); Supabase's built-in sender is only the fallback.
+   - **Authentication** → **Emails**: nothing to change. The API sends sign-in codes itself over SMTP (section 14); Supabase's built-in sender is only the fallback.
    - **Authentication** → **URL Configuration** → **Site URL**: your frontend URL.
 
 Passkeys are handled by our API (WebAuthn via `@simplewebauthn/server`) with Supabase issuing the session, so Supabase itself needs no passkey settings.
@@ -315,14 +315,17 @@ pnpm upgrade:vault --authority ~/.config/vexa/upgrade-authority.json --execute  
 
 ## 14. Email
 
-Sign-in codes go out in Vexa's own template (`apps/api/src/lib/emails.ts`) through [Postmark](https://postmarkapp.com). Supabase's built-in sender only delivers to project members, a few messages an hour, so production needs this.
+Sign-in codes go out in Vexa's own template (`apps/api/src/lib/emails.ts`) over SMTP, from `verify@vexa.finance` through [Fastmail](https://www.fastmail.com). Supabase's built-in sender only delivers to project members, a few messages an hour, so production needs this.
 
-1. Create a Postmark account and a server named `vexa`, then add the sender domain `vexa.finance` under **Sender Signatures → Domains**.
-2. Add the DKIM TXT record and the Return-Path CNAME that Postmark shows to the Netlify DNS zone for vexa.finance, and wait for both to verify.
-3. Copy the server's API token (**Servers → vexa → API Tokens**) into `POSTMARK_SERVER_TOKEN`. `EMAIL_FROM` defaults to `Vexa <verify@vexa.finance>`.
-4. New Postmark accounts can only send to addresses on their own domain until Postmark approves the account, so request approval before launch.
+1. Point vexa.finance's mail at Fastmail: its MX, DKIM (`fm1`–`fm3._domainkey`) and SPF records go in the Netlify DNS zone.
+2. Add `verify@vexa.finance` as an alias in Fastmail (**Settings → Addresses & Domains**), so the account may send as it.
+3. Create an app password with SMTP access (**Settings → Privacy & Security → Connected apps & API tokens**) and set
 
-The API asks Supabase to generate the one-time code without sending it, then sends it itself, so verification is unchanged. Without `POSTMARK_SERVER_TOKEN` it falls back to Supabase's sender.
+```bash
+SMTP_URL=smtps://hello%40vexa.finance:<app password>@smtp.fastmail.com:465
+```
+
+`EMAIL_FROM` defaults to `Vexa <verify@vexa.finance>`. The API asks Supabase to generate the one-time code without sending it, then sends it itself, so verification is unchanged. If the server refuses a message, `POST /v1/auth/otp` answers 503 so the app can tell the user, rather than claiming the code was sent. Without `SMTP_URL` the API falls back to Supabase's sender.
 
 ---
 
@@ -344,5 +347,5 @@ The API asks Supabase to generate the one-time code without sending it, then sen
 [ ] pnpm deploy:policy --execute                  (agents)
 [ ] STEALTH_ROUTE_SEED, ZCASH_SEED, ZCASH_BIRTHDAY (stealth), Railway volume at /data
 [ ] pnpm token:create --execute; vault:set-fees --vexa-mint ($VEXA)
-[ ] Postmark domain verified and account approved, POSTMARK_SERVER_TOKEN set (sign-in email)
+[ ] Fastmail DNS live, verify@ alias added, SMTP_URL set (sign-in email)
 ```

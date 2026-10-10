@@ -21,13 +21,14 @@ import { ApiError } from '../errors.js';
 import type { AppBindings } from '../context.js';
 import { authenticate, principalOf } from '../middleware/auth.js';
 import { clientIp, rateLimit } from '../lib/rate-limit.js';
+import { MailDeliveryError } from '../lib/mailer.js';
 import { parseBody } from '../lib/validate.js';
 
 /**
  * Sign-in is two steps.
  *
  * 1. Email OTP creates the account and proves the email address. Supabase
- *    issues a one-time numeric code and the API emails it through Postmark
+ *    issues a one-time numeric code and the API emails it over SMTP
  *    (see lib/auth-provider.ts); verifying it returns a session.
  * 2. With that session, the user registers a passkey. From then on they sign in
  *    with the passkey alone, and the same passkey's PRF output derives their
@@ -49,9 +50,18 @@ export const auth = new Hono<AppBindings>()
     try {
       await c.get('deps').auth.sendEmailOtp(email);
     } catch (err) {
-      // Log the reason, but answer the same way either way, so this endpoint
-      // can't be used to probe which addresses have accounts.
       c.get('logger').warn({ err }, 'otp send failed');
+      // A refused send says nothing about the address, so tell the user rather
+      // than leave them waiting for an email that isn't coming.
+      if (err instanceof MailDeliveryError) {
+        throw new ApiError(
+          503,
+          ErrorCode.UpstreamUnavailable,
+          "We couldn't send the email right now. Try again in a few minutes.",
+        );
+      }
+      // Anything else answers the same way as success, so this endpoint can't
+      // be used to probe which addresses have accounts.
     }
     return c.json({ sent: true }, 202);
   })
