@@ -30,6 +30,14 @@ export const NEAR_PQ = {
   roadmap: 'https://www.near.org/blog/near-quantum-safe-roadmap',
   release: 'https://github.com/near/nearcore/releases/tag/2.13.0',
 } as const;
+
+/** The on-chain proof that vexa-policy.near is controlled only by ML-DSA-65. */
+export const PQ_ROTATION = {
+  date: '9 October 2026',
+  addKeyTx: 'https://nearblocks.io/txns/2yrhU1vG2ADTYL8YYaCFwzKgUrJwtB4LsviUgNqqkU6e',
+  removeEd25519Tx: 'https://nearblocks.io/txns/5pRfnDPVC4bvj1eEdsCyfo9PmbrxgQUmxhPGuUzWKxk9',
+  keys: 'https://nearblocks.io/address/vexa-policy.near/keys',
+} as const;
 export const STATUS_URL = `${API_URL}/health`;
 export const SECURITY_EMAIL = 'security@vexa.finance';
 export const CONTACT_EMAIL = 'hello@vexa.finance';

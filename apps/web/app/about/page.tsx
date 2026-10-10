@@ -32,8 +32,8 @@ export default function About() {
       <h2>Ready for what comes next</h2>
       <p>
         Quantum computers will one day break the cryptography most blockchains use. Vexa enforces
-        agent limits on NEAR, one of the first blockchains with post-quantum signatures on mainnet,
-        and publishes where every part of the product stands on{' '}
+        agent limits in a NEAR contract that has been controlled only by post-quantum ML-DSA-65 keys
+        since 9 October 2026, and publishes where every part of the product stands on{' '}
         <TLink href="/quantum/">Quantum readiness</TLink>.
       </p>
       <h2>Contact</h2>

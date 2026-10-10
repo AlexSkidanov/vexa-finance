@@ -1,11 +1,11 @@
 import { QuantumKey } from '@/components/quantum-key';
 import { DataTable, minCol, Stat, SubHero } from '@/components/ui';
 import { pageMeta } from '@/lib/meta';
-import { CONTRACTS, DOCS, NEAR_PQ } from '@/lib/site';
+import { CONTRACTS, DOCS, NEAR_PQ, PQ_ROTATION } from '@/lib/site';
 
 export const metadata = pageMeta(
   'Quantum readiness',
-  'What a quantum computer would break, what NEAR has already made post-quantum with ML-DSA, and where each part of Vexa stands, with a live key check.',
+  "Vexa's agent policy contract is controlled only by post-quantum ML-DSA-65 keys, live on NEAR mainnet. A live key check, the on-chain proof, and where every other part of Vexa stands.",
   '/quantum/',
 );
 
@@ -78,21 +78,21 @@ export default function Quantum() {
     <>
       <SubHero
         eyebrow="Quantum readiness"
-        title="Getting ready for Q-Day, in the open."
-        lede="A large enough quantum computer will break the signatures and encryption most blockchains use today. NEAR, where Vexa's agent policy lives, is one of the first blockchains with post-quantum signatures on mainnet. Here is what that covers, what it doesn't yet, and where every part of Vexa stands."
+        title="Post-quantum keys, live on mainnet."
+        lede="Since 9 October 2026, the contract that enforces every agent's spending limits has been controlled only by ML-DSA-65 keys, the NIST post-quantum signature standard, on NEAR mainnet. Its elliptic-curve key is deleted. Check it live below, see the transactions, and see what still depends on Solana, NEAR and Zcash upgrading."
       />
       <section className="wrap sec-next">
         <div className="hgrid" style={minCol(220)}>
           <Stat
-            label="On NEAR mainnet"
+            label="Live on mainnet"
             value="ML-DSA-65"
-            note="NIST FIPS 204 signatures, since nearcore 2.13."
+            note="The only key type on vexa-policy.near since 9 October 2026."
             size="clamp(36px,3.6vw,52px)"
           />
           <Stat
-            label="NEAR consensus"
-            value="2027"
-            note="Near One's target for post-quantum block signing."
+            label="Elliptic-curve keys"
+            value="0"
+            note="The Ed25519 key was deleted in an ML-DSA-signed transaction."
             size="clamp(36px,3.6vw,52px)"
             delay={60}
           />
@@ -111,6 +111,48 @@ export default function Quantum() {
           <QuantumKey />
         </div>
         <div data-reveal="1" data-delay="80" className="ncard">
+          <h3 className="h3">On-chain proof</h3>
+          <p className="body-18" style={{ marginBottom: 14 }}>
+            Every step of the rotation is a public NEAR mainnet transaction, signed on{' '}
+            {PQ_ROTATION.date}.
+          </p>
+          <ul className="body-18" style={{ margin: 0, paddingLeft: 20, display: 'grid', gap: 6 }}>
+            <li>
+              <a
+                href={PQ_ROTATION.addKeyTx}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-link"
+              >
+                ML-DSA-65 key added
+              </a>
+            </li>
+            <li>
+              <a
+                href={PQ_ROTATION.removeEd25519Tx}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-link"
+              >
+                Ed25519 key deleted, signed with ML-DSA-65
+              </a>
+            </li>
+            <li>
+              <a
+                href={PQ_ROTATION.keys}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-link"
+              >
+                The contract&rsquo;s current keys on NearBlocks
+              </a>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section className="wrap sec-next">
+        <div data-reveal="1" className="ncard" style={{ maxWidth: 760 }}>
           <h3 className="h3">Why a privacy product cares now</h3>
           <p className="body-18">
             Blockchains keep everything forever. Someone can save today&rsquo;s encrypted balances
