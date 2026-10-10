@@ -38,14 +38,14 @@ export default function Vexa() {
         <div className="hgrid hgrid-3">
           <Stat
             label="Supply"
-            value="1B"
-            note="1,000,000,000 $VEXA, fixed. The mint authority is revoked at launch."
+            value="≤ 1B"
+            note="1,000,000,000 at launch. The mint authority is revoked, so supply can only go down; the live supply is below."
             size={SIZE}
           />
           <Stat
             label="Standard"
-            value="SPL"
-            note="Classic SPL token on Solana, 6 decimals."
+            value="Token-2022"
+            note="SPL Token Extensions on Solana, 6 decimals. No freeze authority."
             size={SIZE}
             delay={60}
           />

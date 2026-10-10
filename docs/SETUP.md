@@ -304,7 +304,7 @@ ML-DSA keys have no seed phrase, so the JSON file is the only copy. Keep it offl
 
 ## 13. $VEXA
 
-$VEXA's contract address is `71ur38S2zxj1DaA2Untd8VYmAEkvyeXWkw3gycPDpump`, launched on pump.fun rather than with `token:create`. Once the mint exists on-chain, set `VEXA_TOKEN_MINT` to it and run `pnpm vault:set-fees --vexa-mint 71ur38S2zxj1DaA2Untd8VYmAEkvyeXWkw3gycPDpump --execute` to turn on discounts and staking. Staking works with a classic Token or a Token-2022 mint (pump.fun creates the latter), as long as it has 6 decimals and none of the extensions the vault refuses: transfer fees, transfer hooks, a permanent delegate, non-transferable, pausable or frozen-by-default. Vault v0.6.0 or later is needed for Token-2022.
+$VEXA's contract address is `71ur38S2zxj1DaA2Untd8VYmAEkvyeXWkw3gycPDpump`, launched on pump.fun (Token-2022, metadata pointer and token metadata only) rather than with `token:create`. It is set in `VEXA_TOKEN_MINT` and in the vault's fee schedule, which turns on discounts and staking. Staking works with a classic Token or a Token-2022 mint (pump.fun creates the latter), as long as it has 6 decimals and none of the extensions the vault refuses: transfer fees, transfer hooks, a permanent delegate, non-transferable, pausable or frozen-by-default. Vault v0.6.0 or later is needed for Token-2022.
 
 To create a token yourself instead:
 
