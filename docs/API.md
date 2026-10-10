@@ -624,7 +624,10 @@ Records must be transfers you sent or received inside the key's scope. Deleting 
 
 ### `GET /v1/audit/export?viewKey=<id>.<access secret>`
 
-No other authentication. Returns a CSV of the transfers in scope, each record still encrypted, with an Ed25519 signature over the body in `X-Vexa-Signature`:
+No other authentication. Returns a CSV of the transfers in scope, each record still encrypted, signed twice over the exact body bytes:
+
+- `X-Vexa-Signature`: Ed25519, base58.
+- `X-Vexa-Signature-ML-DSA-65`: post-quantum ML-DSA-65 (NIST FIPS 204), base64, empty context string. An archived export stays verifiable after Ed25519 can be forged.
 
 ```csv
 # vexa audit export; view key …; scope … to …
@@ -632,7 +635,22 @@ transfer_id,created_at,direction,counterparty,tx_sig,record
 …,2026-09-30T10:00:00.000Z,sent,bob,5Kx…,<base64>
 ```
 
-`exportAudit(viewKey)` in `@vexa/sdk` fetches it, checks the signature against `GET /v1/audit/signing-key`, and decrypts every row on the auditor's device.
+`exportAudit(viewKey)` in `@vexa/sdk` fetches it, checks both signatures against `GET /v1/audit/signing-key`, and decrypts every row on the auditor's device. `signatureValid` is true only if every signature on the export verifies; `pqSignatureValid` reports the ML-DSA-65 one on its own.
+
+### `GET /v1/audit/signing-key`
+
+```json
+{
+  "algorithm": "ed25519",
+  "publicKey": "<base58>",
+  "keys": [
+    { "algorithm": "ed25519", "encoding": "base58", "publicKey": "<base58>" },
+    { "algorithm": "ml-dsa-65", "encoding": "base64", "publicKey": "<base64, 1952 bytes>" }
+  ]
+}
+```
+
+`algorithm` and `publicKey` are kept for existing verifiers. Both keys are derived from `VIEW_KEY_ENCRYPTION_KEY`, so they only change if that secret does.
 
 ---
 

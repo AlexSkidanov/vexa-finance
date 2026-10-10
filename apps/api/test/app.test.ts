@@ -22,6 +22,27 @@ describe('health', () => {
   });
 });
 
+describe('audit signing keys', () => {
+  it('publishes the Ed25519 key and a post-quantum ML-DSA-65 key', async () => {
+    const res = await testApp().request('GET', '/v1/audit/signing-key');
+    const body = (await res.json()) as {
+      algorithm: string;
+      publicKey: string;
+      keys: { algorithm: string; encoding: string; publicKey: string }[];
+    };
+    expect(body.algorithm).toBe('ed25519');
+    expect(body.keys.map((k) => k.algorithm)).toEqual(['ed25519', 'ml-dsa-65']);
+    const pq = body.keys[1]!;
+    expect(pq.encoding).toBe('base64');
+    expect(Buffer.from(pq.publicKey, 'base64')).toHaveLength(1952);
+    // Derived, not random: the same secret always gives the same key.
+    const again = (await (await testApp().request('GET', '/v1/audit/signing-key')).json()) as {
+      keys: { publicKey: string }[];
+    };
+    expect(again.keys[1]!.publicKey).toBe(pq.publicKey);
+  });
+});
+
 describe('request ids and errors', () => {
   it('generates a request id and includes it in error bodies', async () => {
     const res = await testApp().request('GET', '/v1/nope');

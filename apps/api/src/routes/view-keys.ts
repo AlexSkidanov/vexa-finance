@@ -11,6 +11,7 @@ import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { ed25519 } from '@noble/curves/ed25519.js';
+import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
 import {
   AddViewRecordsRequest,
   base58Decode,
@@ -27,16 +28,37 @@ import { authenticate, principalOf } from '../middleware/auth.js';
 import { idempotent } from '../middleware/idempotency.js';
 import { parseBody } from '../lib/validate.js';
 
-/** The Ed25519 key that signs exports, derived from VIEW_KEY_ENCRYPTION_KEY. */
-function signingKey(env: Deps['env']) {
-  const seed = hkdf(
+const auditSeed = (env: Deps['env'], info: string) =>
+  hkdf(
     sha256,
     hexToBytes(env.VIEW_KEY_ENCRYPTION_KEY),
     new TextEncoder().encode('vexa.finance'),
-    new TextEncoder().encode('vexa/audit-signing/v1'),
+    new TextEncoder().encode(info),
     32,
   );
+
+/** The Ed25519 key that signs exports, derived from VIEW_KEY_ENCRYPTION_KEY. */
+function signingKey(env: Deps['env']) {
+  const seed = auditSeed(env, 'vexa/audit-signing/v1');
   return { seed, publicKey: base58Encode(ed25519.getPublicKey(seed)) };
+}
+
+/**
+ * The ML-DSA-65 (FIPS 204) key that also signs exports, so an archived export
+ * stays verifiable after Ed25519 can be forged. Derived from the same secret
+ * under its own label; key generation is slow enough to cache.
+ */
+let mlDsaKey: { for: string; secretKey: Uint8Array; publicKey: string } | null = null;
+function mlDsaSigningKey(env: Deps['env']) {
+  if (mlDsaKey?.for !== env.VIEW_KEY_ENCRYPTION_KEY) {
+    const keys = ml_dsa65.keygen(auditSeed(env, 'vexa/audit-signing/ml-dsa-65/v1'));
+    mlDsaKey = {
+      for: env.VIEW_KEY_ENCRYPTION_KEY,
+      secretKey: keys.secretKey,
+      publicKey: base64Encode(keys.publicKey),
+    };
+  }
+  return mlDsaKey;
 }
 
 const view = (v: ViewKeyRow) => ({
@@ -99,17 +121,31 @@ export const viewKeys = new Hono<AppBindings>()
   });
 
 export const audit = new Hono<AppBindings>()
-  /** The public key audit exports are signed with. */
-  .get('/signing-key', (c) =>
-    c.json({ algorithm: 'ed25519', publicKey: signingKey(c.get('deps').env).publicKey }),
-  )
+  /**
+   * The public keys audit exports are signed with. `algorithm` and `publicKey`
+   * are the Ed25519 key, as before; `keys` lists every signing key.
+   */
+  .get('/signing-key', (c) => {
+    const { env } = c.get('deps');
+    const ed = signingKey(env).publicKey;
+    return c.json({
+      algorithm: 'ed25519',
+      publicKey: ed,
+      keys: [
+        { algorithm: 'ed25519', encoding: 'base58', publicKey: ed },
+        { algorithm: 'ml-dsa-65', encoding: 'base64', publicKey: mlDsaSigningKey(env).publicKey },
+      ],
+    });
+  })
 
   /**
    * GET /v1/audit/export?viewKey=<id>.<access secret>
    *
    * No other authentication: the access secret is the credential. Returns a
    * CSV of the transfers in scope, each with its record still encrypted to
-   * the view key, and an Ed25519 signature over the body in `X-Vexa-Signature`.
+   * the view key. The body is signed twice: Ed25519 in `X-Vexa-Signature`
+   * (base58) and post-quantum ML-DSA-65 in `X-Vexa-Signature-ML-DSA-65`
+   * (base64, empty context string).
    */
   .get('/export', async (c) => {
     const { store, env } = c.get('deps');
@@ -134,11 +170,13 @@ export const audit = new Hono<AppBindings>()
       ),
     ];
     const csv = `${lines.join('\n')}\n`;
-    const { seed } = signingKey(env);
-    const signature = base58Encode(ed25519.sign(new TextEncoder().encode(csv), seed));
+    const bytes = new TextEncoder().encode(csv);
+    const signature = base58Encode(ed25519.sign(bytes, signingKey(env).seed));
+    const pqSignature = base64Encode(ml_dsa65.sign(bytes, mlDsaSigningKey(env).secretKey));
     return c.body(csv, 200, {
       'content-type': 'text/csv; charset=utf-8',
       'x-vexa-signature': signature,
+      'x-vexa-signature-ml-dsa-65': pqSignature,
       'cache-control': 'no-store',
     });
   });

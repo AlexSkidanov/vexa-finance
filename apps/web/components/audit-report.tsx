@@ -38,7 +38,15 @@ export function AuditReportView() {
     const sig = [
       `signature ${report.signature ?? 'missing'}`,
       `public_key ${report.publicKey ?? 'unknown'}`,
-      'algorithm ed25519 over the exact bytes of the .csv file',
+      'algorithm ed25519 (base58) over the exact bytes of the .csv file',
+      ...(report.pqSignature
+        ? [
+            '',
+            `ml_dsa_65_signature ${report.pqSignature}`,
+            `ml_dsa_65_public_key ${report.pqPublicKey ?? 'unknown'}`,
+            'algorithm ml-dsa-65, FIPS 204 (base64, empty context) over the same bytes',
+          ]
+        : []),
       '',
     ].join('\n');
     window.setTimeout(() => downloadText(`${base}.csv.sig`, sig, 'text/plain;charset=utf-8'), 300);
@@ -82,7 +90,9 @@ export function AuditReportView() {
         ) : report.signatureValid ? (
           <div className="chip chip-signal" style={{ padding: '9px 13px' }}>
             <span className="dot" />
-            Signed by Vexa · signature verified
+            {report.pqSignatureValid
+              ? 'Signed by Vexa · Ed25519 and post-quantum ML-DSA-65 verified'
+              : 'Signed by Vexa · signature verified'}
           </div>
         ) : (
           <div className="chip chip-warn" style={{ padding: '9px 13px' }} role="alert">
