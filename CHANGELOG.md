@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dedicated key right after initialization.
 - Vault v0.3.0 (the protocol fee) upgraded in place, with the fee schedule set to 0.10% capped at
   5 USDC.
+- Vault v0.6.0 (Token-2022 $VEXA staking) upgraded in place on 9 October 2026: bytecode sha256
+  `fb44d4942763a688ba5d8362e418bf1fc25c15973923ba7713028d9e11527692`, 53,688 bytes.
 
 ### Added
 
