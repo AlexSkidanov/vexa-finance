@@ -25,12 +25,14 @@
     "@vexa/core": "workspace:*",
     "hono": "^4.13.10",
     "jose": "^6.2.12",
+    "nodemailer": "10.0.10",
     "pino": "^10.3.1",
     "postgres": "^3.4.9",
     "zod": "^4.1.0"
   },
   "devDependencies": {
     "@solana-program/system": "^0.15.0",
+    "@types/nodemailer": "8.0.2",
     "@vexa/sdk": "workspace:^",
     "dotenv": "^16.4.7",
     "litesvm": "1.5.0",

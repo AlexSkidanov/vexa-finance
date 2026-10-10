@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { signInCodeEmail } from '../src/lib/emails.js';
-import { createPostmarkMailer } from '../src/lib/mailer.js';
+import { createPostmarkMailer, createSmtpMailer, MailDeliveryError } from '../src/lib/mailer.js';
 
 describe('sign-in code email', () => {
   it('puts the code in the subject, the HTML and the plain-text part', () => {
@@ -57,5 +57,18 @@ describe('Postmark mailer', () => {
     await expect(mailer.send(signInCodeEmail('ada@example.com', '123456'))).rejects.toThrow(
       /postmark 422: .*Sender signature not confirmed/,
     );
+  });
+});
+
+describe('SMTP mailer', () => {
+  it('reports a failed connection as a delivery error', async () => {
+    // Nothing listens on port 1, so the connection is refused straight away.
+    const mailer = createSmtpMailer({
+      url: 'smtp://127.0.0.1:1',
+      from: 'Vexa <verify@vexa.finance>',
+    });
+    const sent = mailer.send(signInCodeEmail('ada@example.com', '123456'));
+    await expect(sent).rejects.toBeInstanceOf(MailDeliveryError);
+    await expect(sent).rejects.toThrow(/^smtp: /);
   });
 });

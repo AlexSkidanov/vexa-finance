@@ -324,6 +324,14 @@ Sign-in codes go out in Vexa's own template (`apps/api/src/lib/emails.ts`) throu
 
 The API asks Supabase to generate the one-time code without sending it, then sends it itself, so verification is unchanged. Without `POSTMARK_SERVER_TOKEN` it falls back to Supabase's sender.
 
+**Before Postmark approves the account**, send through any SMTP server instead. With Fastmail: add `verify@vexa.finance` as an alias, create an app password with SMTP access, and set
+
+```bash
+SMTP_URL=smtps://hello%40vexa.finance:<app password>@smtp.fastmail.com:465
+```
+
+`SMTP_URL` takes precedence over `POSTMARK_SERVER_TOKEN`; remove it to go back to Postmark. If the provider refuses a message, `POST /v1/auth/otp` answers 503 so the app can tell the user, rather than claiming the code was sent.
+
 ---
 
 ## Checklist
