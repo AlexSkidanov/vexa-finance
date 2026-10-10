@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { base58Encode } from '@vexa/core';
 import { deriveViewKey, encodeViewKey, encryptViewRecord } from '@vexa/core/view-keys';
@@ -90,6 +91,40 @@ describe('openViewKey', () => {
     expect(report.rows[0]?.memo).toBe('Lunch');
     const decryptHalf = encoded.split('.')[2]!;
     expect(urls.join(' ')).not.toContain(decryptHalf);
+  });
+
+  it('checks the post-quantum ML-DSA-65 signature too', async () => {
+    const csv = exportCsv();
+    const bytes = new TextEncoder().encode(csv);
+    const sig = base58Encode(ed25519.sign(bytes, seed));
+    const pq = ml_dsa65.keygen(new Uint8Array(32).fill(5));
+    const b64 = (b: Uint8Array) => btoa(String.fromCharCode(...b));
+    const keys = Response.json({
+      publicKey,
+      keys: [
+        { algorithm: 'ed25519', publicKey },
+        { algorithm: 'ml-dsa-65', publicKey: b64(pq.publicKey) },
+      ],
+    });
+    const serve = (pqSig: string) =>
+      vi.stubGlobal('fetch', async (url: string) => {
+        if (url.includes('/signing-key')) return keys.clone();
+        return new Response(csv, {
+          headers: { 'x-vexa-signature': sig, 'x-vexa-signature-ml-dsa-65': pqSig },
+        });
+      });
+
+    serve(b64(ml_dsa65.sign(bytes, pq.secretKey)));
+    const good = await openViewKey(encodeViewKey(key));
+    expect(good.pqSignatureValid).toBe(true);
+    expect(good.signatureValid).toBe(true);
+
+    // A valid Ed25519 signature doesn't rescue a forged post-quantum one.
+    const other = ml_dsa65.keygen(new Uint8Array(32).fill(6));
+    serve(b64(ml_dsa65.sign(bytes, other.secretKey)));
+    const forged = await openViewKey(encodeViewKey(key));
+    expect(forged.pqSignatureValid).toBe(false);
+    expect(forged.signatureValid).toBe(false);
   });
 
   it('flags a bad signature', async () => {

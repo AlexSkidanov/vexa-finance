@@ -7,6 +7,7 @@ import {
   decodeViewKey,
   decryptViewRecord,
   verifyAuditExport,
+  verifyAuditExportMlDsa,
   viewKeyAccessToken,
 } from '@vexa/core/view-keys';
 import type { ViewKey } from '@vexa/core/view-keys';
@@ -40,11 +41,16 @@ export interface AuditReport {
   scopeFrom: Date | null;
   scopeTo: Date | null;
   rows: AuditRow[];
+  /** Every signature the export carries checked out, including the post-quantum one. */
   signatureValid: boolean;
-  /** The export exactly as received, and its signature, for "Download signed original". */
+  /** The ML-DSA-65 signature's result; null if the export didn't carry one. */
+  pqSignatureValid: boolean | null;
+  /** The export exactly as received, and its signatures, for "Download signed original". */
   rawCsv: string | null;
   signature: string | null;
   publicKey: string | null;
+  pqSignature: string | null;
+  pqPublicKey: string | null;
 }
 
 /* ── In-memory store shared by /audit and /audit/report ── */
@@ -177,12 +183,25 @@ export async function openViewKey(input: string): Promise<AuditReport> {
 
   const csv = await exportRes.text();
   const signature = exportRes.headers.get('x-vexa-signature');
+  const pqSignature = exportRes.headers.get('x-vexa-signature-ml-dsa-65');
   let publicKey: string | null = null;
+  let pqPublicKey: string | null = null;
   if (keyRes.ok) {
-    const body = (await keyRes.json().catch(() => null)) as { publicKey?: unknown } | null;
+    const body = (await keyRes.json().catch(() => null)) as {
+      publicKey?: unknown;
+      keys?: { algorithm?: unknown; publicKey?: unknown }[];
+    } | null;
     if (body && typeof body.publicKey === 'string') publicKey = body.publicKey;
+    const pq = Array.isArray(body?.keys)
+      ? body.keys.find((k) => k?.algorithm === 'ml-dsa-65')
+      : undefined;
+    if (pq && typeof pq.publicKey === 'string') pqPublicKey = pq.publicKey;
   }
-  const signatureValid = !!signature && !!publicKey && verifyAuditExport(csv, signature, publicKey);
+  const edValid = !!signature && !!publicKey && verifyAuditExport(csv, signature, publicKey);
+  const pqSignatureValid = pqSignature
+    ? !!pqPublicKey && verifyAuditExportMlDsa(csv, pqSignature, pqPublicKey)
+    : null;
+  const signatureValid = edValid && pqSignatureValid !== false;
 
   const parsed = parseExport(csv);
   const rows: AuditRow[] = parsed.records.map((r) => {
@@ -214,9 +233,12 @@ export async function openViewKey(input: string): Promise<AuditReport> {
     scopeTo: parsed.scopeTo,
     rows,
     signatureValid,
+    pqSignatureValid,
     rawCsv: csv,
     signature,
     publicKey,
+    pqSignature,
+    pqPublicKey,
   };
 }
 
@@ -298,8 +320,11 @@ export function sampleReport(): AuditReport {
       memo,
     })),
     signatureValid: false,
+    pqSignatureValid: null,
     rawCsv: null,
     signature: null,
     publicKey: null,
+    pqSignature: null,
+    pqPublicKey: null,
   };
 }

@@ -34,7 +34,13 @@ export function createApp(deps: Deps) {
     cors({
       origin: deps.env.WEBAUTHN_ORIGINS,
       allowHeaders: ['Authorization', 'Content-Type', 'Idempotency-Key', 'X-Request-Id'],
-      exposeHeaders: ['X-Request-Id', 'Idempotent-Replayed', 'Retry-After', 'X-Vexa-Signature'],
+      exposeHeaders: [
+        'X-Request-Id',
+        'Idempotent-Replayed',
+        'Retry-After',
+        'X-Vexa-Signature',
+        'X-Vexa-Signature-ML-DSA-65',
+      ],
       maxAge: 600,
     }),
   );

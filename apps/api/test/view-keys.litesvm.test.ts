@@ -89,11 +89,19 @@ describe.skipIf(!vaultBinaryExists())(
       const res = await api.app.request(
         `/v1/audit/export?viewKey=${encodeURIComponent(viewKey.slice('vxview_'.length).split('.').slice(0, 2).join('.'))}`,
       );
-      const { verifyAuditExport } = await import('@vexa/core/crypto');
+      const { verifyAuditExport, verifyAuditExportMlDsa } = await import('@vexa/core/crypto');
       const signing = (await (await api.app.request('/v1/audit/signing-key')).json()) as {
         publicKey: string;
+        keys: { algorithm: string; publicKey: string }[];
       };
+      const pqKey = signing.keys.find((k) => k.algorithm === 'ml-dsa-65')!.publicKey;
+      const pqSig = res.headers.get('x-vexa-signature-ml-dsa-65')!;
       const body = await res.text();
+      expect(verifyAuditExport(body, res.headers.get('x-vexa-signature')!, signing.publicKey)).toBe(
+        true,
+      );
+      // The post-quantum signature covers the same bytes.
+      expect(verifyAuditExportMlDsa(body, pqSig, pqKey)).toBe(true);
       expect(
         verifyAuditExport(
           body.replace('sent', 'received'),
@@ -101,6 +109,7 @@ describe.skipIf(!vaultBinaryExists())(
           signing.publicKey,
         ),
       ).toBe(false);
+      expect(verifyAuditExportMlDsa(body.replace('sent', 'received'), pqSig, pqKey)).toBe(false);
 
       // Bob can't use Alice's view key id with a guessed secret.
       const [id] = viewKey.slice('vxview_'.length).split('.');

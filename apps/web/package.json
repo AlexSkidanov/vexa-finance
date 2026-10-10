@@ -21,6 +21,7 @@
   },
   "devDependencies": {
     "@noble/curves": "^2.4.0",
+    "@noble/post-quantum": "0.7.1",
     "@types/node": "^22.10.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",

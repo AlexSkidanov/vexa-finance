@@ -66,9 +66,14 @@ const VEXA: [string, string, string][] = [
   ],
   ['Stealth transfers', 'Zcash Orchard via NEAR Intents', 'Waits on Zcash and NEAR Intents.'],
   [
-    'Signed audit exports and webhooks',
-    'Ed25519',
-    'Add an ML-DSA-65 signature alongside the current one.',
+    'Signed audit exports',
+    'Ed25519 and ML-DSA-65 on every export',
+    'Done: the audit portal verifies both signatures in your browser.',
+  ],
+  [
+    'Webhook signatures',
+    'HMAC-SHA256',
+    'Already quantum-resistant: symmetric, like the stored secrets below.',
   ],
   ['Stored secrets (API keys, view keys)', 'AES-256-GCM', 'Already quantum-resistant.'],
 ];

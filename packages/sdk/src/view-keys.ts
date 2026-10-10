@@ -19,6 +19,7 @@ import {
   encodeViewKey,
   encryptViewRecord,
   verifyAuditExport,
+  verifyAuditExportMlDsa,
   viewKeyAccessHash,
   viewKeyAccessToken,
   type UserKeys,
@@ -160,19 +161,36 @@ export async function exportAudit(
   csv: string;
   signed: string;
   signature: string;
+  /** The post-quantum ML-DSA-65 signature (base64), or null if the export had none. */
+  pqSignature: string | null;
+  /** Every signature on the export verified, the ML-DSA-65 one included. */
   signatureValid: boolean;
+  /** The ML-DSA-65 signature's own result; null if the export had none. */
+  pqSignatureValid: boolean | null;
 }> {
   const key = decodeViewKey(viewKey);
   const base = (opts.baseUrl ?? DEFAULT_BASE_URLS.live).replace(/\/$/, '');
   const f = opts.fetch ?? globalThis.fetch.bind(globalThis);
   const [exported, signingKey] = await Promise.all([
     f(`${base}/v1/audit/export?viewKey=${encodeURIComponent(viewKeyAccessToken(key))}`),
-    f(`${base}/v1/audit/signing-key`).then((r) => r.json() as Promise<{ publicKey: string }>),
+    f(`${base}/v1/audit/signing-key`).then(
+      (r) =>
+        r.json() as Promise<{
+          publicKey: string;
+          keys?: { algorithm: string; publicKey: string }[];
+        }>,
+    ),
   ]);
   if (!exported.ok) throw new Error(`export failed: ${exported.status}`);
   const signed = await exported.text();
   const signature = exported.headers.get('x-vexa-signature') ?? '';
-  const signatureValid = verifyAuditExport(signed, signature, signingKey.publicKey);
+  const pqSignature = exported.headers.get('x-vexa-signature-ml-dsa-65');
+  const pqKey = signingKey.keys?.find((k) => k.algorithm === 'ml-dsa-65')?.publicKey;
+  const pqSignatureValid = pqSignature
+    ? !!pqKey && verifyAuditExportMlDsa(signed, pqSignature, pqKey)
+    : null;
+  const signatureValid =
+    verifyAuditExport(signed, signature, signingKey.publicKey) && pqSignatureValid !== false;
 
   const rows: AuditRow[] = [];
   for (const line of signed.split('\n')) {
@@ -217,5 +235,13 @@ export async function exportAudit(
       ].join(','),
     ),
   ].join('\n');
-  return { rows, csv: `${csv}\n`, signed, signature, signatureValid };
+  return {
+    rows,
+    csv: `${csv}\n`,
+    signed,
+    signature,
+    pqSignature,
+    signatureValid,
+    pqSignatureValid,
+  };
 }

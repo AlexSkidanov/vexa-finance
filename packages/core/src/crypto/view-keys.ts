@@ -19,7 +19,8 @@ import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { ed25519 } from '@noble/curves/ed25519.js';
-import { base58DecodeStrict, base58Encode } from '../encoding.js';
+import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
+import { base58DecodeStrict, base58Encode, base64Decode } from '../encoding.js';
 
 const SALT = new TextEncoder().encode('vexa.finance');
 const info = (s: string) => new TextEncoder().encode(s);
@@ -113,6 +114,23 @@ export function verifyAuditExport(csv: string, signature: string, publicKey: str
       new TextEncoder().encode(csv),
       base58DecodeStrict(publicKey, 'public key'),
     );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Checks the API's post-quantum ML-DSA-65 (FIPS 204) signature on an audit
+ * export: base64 signature and public key, signed over the exact CSV bytes with
+ * an empty context string. An auditor who keeps the export can still trust it
+ * after a quantum computer can forge Ed25519.
+ */
+export function verifyAuditExportMlDsa(csv: string, signature: string, publicKey: string): boolean {
+  const sig = base64Decode(signature);
+  const key = base64Decode(publicKey);
+  if (!sig || !key || sig.length !== 3309 || key.length !== 1952) return false;
+  try {
+    return ml_dsa65.verify(sig, new TextEncoder().encode(csv), key);
   } catch {
     return false;
   }
