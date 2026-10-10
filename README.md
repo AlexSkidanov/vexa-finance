@@ -97,7 +97,7 @@ A stealth transfer leaves no on-chain link between sender and recipient: it goes
 
 View keys give an auditor scoped, revocable read access, decrypted on the auditor's device from a signed export. $VEXA holders get fee discounts and higher agent limits by stake (details in [docs/API.md](docs/API.md#get-v1tier)).
 
-$VEXA contract address (Solana, launching on pump.fun): `71ur38S2zxj1DaA2Untd8VYmAEkvyeXWkw3gycPDpump`. [vexa.finance/vexa](https://vexa.finance/vexa/) reads its status from Solana mainnet.
+$VEXA contract address (Solana, launched on pump.fun as a Token-2022 token): `71ur38S2zxj1DaA2Untd8VYmAEkvyeXWkw3gycPDpump`. The mint authority is revoked and there is no freeze authority. [vexa.finance/vexa](https://vexa.finance/vexa/) reads its live supply from Solana mainnet.
 
 ## Repository layout
 

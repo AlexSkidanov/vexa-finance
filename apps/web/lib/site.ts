@@ -93,7 +93,7 @@ export const CONTRACT_LIST: { name: string; chain: string; addr: string; href: s
   },
 ];
 
-/** $VEXA's contract address, published before launch; launching on pump.fun. */
+/** $VEXA's contract address: a Token-2022 mint launched on pump.fun. */
 export const VEXA_MINT = '71ur38S2zxj1DaA2Untd8VYmAEkvyeXWkw3gycPDpump';
 export const VEXA_LINKS = {
   solscan: `https://solscan.io/token/${VEXA_MINT}`,
